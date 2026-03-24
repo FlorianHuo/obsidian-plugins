@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+main.js
+*.js.map
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# Environment
+.env
+.env.local
+
+# npm
+npm-debug.log*
+
+# Obsidian
+data.json
