@@ -42,4 +42,4 @@ npm run dev
 
 | Plugin | Description | Status |
 |--------|-------------|--------|
-| (none yet) | - | - |
+| [workspace-switcher](./workspace-switcher/) | Switch between a TODO workspace (3 tracks + daily note) and a focus workspace (single panel) | v1.0.0 |

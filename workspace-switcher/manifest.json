@@ -1,0 +1,9 @@
+{
+    "id": "workspace-switcher",
+    "name": "Workspace Switcher",
+    "version": "1.0.0",
+    "minAppVersion": "0.15.0",
+    "description": "Switch between a TODO workspace (3 tracks + daily note) and a focus workspace (single panel).",
+    "author": "Florian",
+    "isDesktopOnly": false
+}
