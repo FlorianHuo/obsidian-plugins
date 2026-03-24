@@ -35,22 +35,11 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     return `${y}-${m}-${d}`;
   }
 
-  // Ensure a file exists; create it from template if missing
+  // Ensure a file exists; create it if missing
   async ensureFile(path) {
     let file = this.app.vault.getAbstractFileByPath(path);
     if (!file) {
-      if (path.startsWith("journal/")) {
-        const templatePath = "templates/daily.md";
-        const templateFile =
-          this.app.vault.getAbstractFileByPath(templatePath);
-        let content = "";
-        if (templateFile) {
-          content = await this.app.vault.read(templateFile);
-        }
-        file = await this.app.vault.create(path, content);
-      } else {
-        file = await this.app.vault.create(path, "");
-      }
+      file = await this.app.vault.create(path, "");
     }
     return file;
   }
@@ -71,7 +60,7 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     if (this.data.lastDailyReset === today) return;
 
     const templateFile =
-      this.app.vault.getAbstractFileByPath("templates/daily-track.md");
+      this.app.vault.getAbstractFileByPath("templates/daily.md");
     if (!templateFile) return;
 
     const dailyTrack =
