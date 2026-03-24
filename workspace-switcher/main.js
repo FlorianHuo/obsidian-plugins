@@ -155,7 +155,7 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
                       state: {
                         type: "markdown",
                         state: {
-                          file: "tracks/tracks.md",
+                          file: "tracks/current.md",
                           mode: "source",
                           source: false,
                         },
