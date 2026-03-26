@@ -1,0 +1,5 @@
+/* Hide tab header bar when a pane contains only one tab.
+   The bar reappears automatically if multiple tabs are opened. */
+.workspace-tab-header-container:has(.workspace-tab-header:only-child) {
+  display: none !important;
+}
