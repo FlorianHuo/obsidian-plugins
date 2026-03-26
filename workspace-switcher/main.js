@@ -1,17 +1,44 @@
 // Workspace Switcher Plugin for Obsidian
-// Provides two commands:
-//   1. "Switch to TODO workspace" - 3 tracks (urgent/important/trivial) on top + daily note on bottom
-//   2. "Switch to Focus workspace" - single panel with the currently active file
+//
+// Built-in workspaces:
+//   - "TODO workspace"  - 3 tracks (urgent/important/trivial) on top + daily note on bottom
+//   - "Focus workspace" - single panel with the currently active file
+//
+// User-defined workspaces:
+//   - Save / Load / Delete custom layouts via commands
 //
 // Key design: uses workspace.getLayout() to preserve sidebars,
 // only modifies the "main" area of the layout.
 
 const obsidian = require("obsidian");
 
+// Modal for selecting a saved workspace from a fuzzy-search list
+class WorkspacePickerModal extends obsidian.FuzzySuggestModal {
+  constructor(app, workspaceNames, onChoose) {
+    super(app);
+    this.names = workspaceNames;
+    this.onChoose = onChoose;
+    this.setPlaceholder("Type to search workspaces...");
+  }
+
+  getItems() {
+    return this.names;
+  }
+
+  getItemText(name) {
+    return name;
+  }
+
+  onChooseItem(name) {
+    this.onChoose(name);
+  }
+}
+
 class WorkspaceSwitcherPlugin extends obsidian.Plugin {
   async onload() {
-    // Load persisted data (tracks last reset date)
+    // Load persisted data (tracks last reset date + saved workspaces)
     this.data = (await this.loadData()) || {};
+    if (!this.data.workspaces) this.data.workspaces = {};
 
     this.addCommand({
       id: "todo-workspace",
@@ -23,6 +50,24 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
       id: "focus-workspace",
       name: "Switch to Focus workspace",
       callback: () => this.switchToFocusWorkspace(),
+    });
+
+    this.addCommand({
+      id: "save-workspace",
+      name: "Save current workspace",
+      callback: () => this.saveCurrentWorkspace(),
+    });
+
+    this.addCommand({
+      id: "load-workspace",
+      name: "Load workspace",
+      callback: () => this.loadSavedWorkspace(),
+    });
+
+    this.addCommand({
+      id: "delete-workspace",
+      name: "Delete workspace",
+      callback: () => this.deleteSavedWorkspace(),
     });
   }
 
@@ -238,6 +283,105 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     };
 
     await this.applyMainLayout(newMain);
+  }
+
+  // ---- Custom workspace management ----
+
+  async saveCurrentWorkspace() {
+    const name = await this.promptForName("Save workspace as:");
+    if (!name) return;
+
+    // Capture only the main area (not sidebars)
+    const layout = this.app.workspace.getLayout();
+    this.data.workspaces[name] = layout.main;
+    await this.saveData(this.data);
+    new obsidian.Notice(`Workspace "${name}" saved.`);
+  }
+
+  async loadSavedWorkspace() {
+    const names = Object.keys(this.data.workspaces);
+    if (names.length === 0) {
+      new obsidian.Notice("No saved workspaces.");
+      return;
+    }
+
+    new WorkspacePickerModal(this.app, names, async (name) => {
+      const mainLayout = this.data.workspaces[name];
+      if (mainLayout) {
+        await this.applyMainLayout(mainLayout);
+        new obsidian.Notice(`Workspace "${name}" loaded.`);
+      }
+    }).open();
+  }
+
+  async deleteSavedWorkspace() {
+    const names = Object.keys(this.data.workspaces);
+    if (names.length === 0) {
+      new obsidian.Notice("No saved workspaces.");
+      return;
+    }
+
+    new WorkspacePickerModal(this.app, names, async (name) => {
+      delete this.data.workspaces[name];
+      await this.saveData(this.data);
+      new obsidian.Notice(`Workspace "${name}" deleted.`);
+    }).open();
+  }
+
+  // Show a prompt dialog and return the entered text (or null if cancelled)
+  promptForName(message) {
+    return new Promise((resolve) => {
+      const modal = new PromptModal(this.app, message, resolve);
+      modal.open();
+    });
+  }
+}
+
+// Simple text input modal for prompting a workspace name
+class PromptModal extends obsidian.Modal {
+  constructor(app, message, onSubmit) {
+    super(app);
+    this.message = message;
+    this.onSubmit = onSubmit;
+    this.result = null;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("p", { text: this.message });
+
+    const input = contentEl.createEl("input", { type: "text" });
+    input.style.width = "100%";
+    input.focus();
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        this.result = input.value.trim();
+        this.close();
+      } else if (e.key === "Escape") {
+        this.close();
+      }
+    });
+
+    const btnContainer = contentEl.createDiv({ cls: "modal-button-container" });
+    const saveBtn = btnContainer.createEl("button", {
+      text: "Save",
+      cls: "mod-cta",
+    });
+    saveBtn.addEventListener("click", () => {
+      this.result = input.value.trim();
+      this.close();
+    });
+
+    const cancelBtn = btnContainer.createEl("button", { text: "Cancel" });
+    cancelBtn.addEventListener("click", () => {
+      this.close();
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+    this.onSubmit(this.result || null);
   }
 }
 
