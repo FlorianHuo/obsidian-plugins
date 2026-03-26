@@ -291,9 +291,9 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     const name = await this.promptForName("Save workspace as:");
     if (!name) return;
 
-    // Capture only the main area (not sidebars)
+    // Capture the full layout (including sidebars)
     const layout = this.app.workspace.getLayout();
-    this.data.workspaces[name] = layout.main;
+    this.data.workspaces[name] = layout;
     await this.saveData(this.data);
     new obsidian.Notice(`Workspace "${name}" saved.`);
   }
@@ -306,9 +306,9 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     }
 
     new WorkspacePickerModal(this.app, names, async (name) => {
-      const mainLayout = this.data.workspaces[name];
-      if (mainLayout) {
-        await this.applyMainLayout(mainLayout);
+      const savedLayout = this.data.workspaces[name];
+      if (savedLayout) {
+        await this.app.workspace.changeLayout(savedLayout);
         new obsidian.Notice(`Workspace "${name}" loaded.`);
       }
     }).open();
