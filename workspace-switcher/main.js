@@ -308,10 +308,38 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     new WorkspacePickerModal(this.app, names, async (name) => {
       const savedLayout = this.data.workspaces[name];
       if (savedLayout) {
-        await this.app.workspace.changeLayout(savedLayout);
+        // Deep clone to avoid mutating saved data
+        const layout = JSON.parse(JSON.stringify(savedLayout));
+
+        // Update any journal/YYYY-MM-DD.md paths to today's date
+        const todayPath = `journal/${this.getTodayDateStr()}.md`;
+        this.updateJournalPaths(layout, todayPath);
+
+        // Ensure today's daily note file exists
+        await this.ensureFile(todayPath);
+
+        // Reset daily track if a new day has started
+        await this.resetDailyTrackIfNeeded();
+
+        await this.app.workspace.changeLayout(layout);
         new obsidian.Notice(`Workspace "${name}" loaded.`);
       }
     }).open();
+  }
+
+  // Recursively walk a layout tree and replace journal date paths with today's
+  updateJournalPaths(node, todayPath) {
+    if (!node) return;
+    if (node.type === "leaf" && node.state && node.state.state &&
+        typeof node.state.state.file === "string" &&
+        /^journal\/\d{4}-\d{2}-\d{2}\.md$/.test(node.state.state.file)) {
+      node.state.state.file = todayPath;
+    }
+    if (Array.isArray(node.children)) {
+      for (const child of node.children) {
+        this.updateJournalPaths(child, todayPath);
+      }
+    }
   }
 
   async deleteSavedWorkspace() {
