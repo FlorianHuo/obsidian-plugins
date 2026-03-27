@@ -40,6 +40,9 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     this.data = (await this.loadData()) || {};
     if (!this.data.workspaces) this.data.workspaces = {};
 
+    // On startup: update stale journal paths and reset daily track
+    this.app.workspace.onLayoutReady(() => this.onStartup());
+
     this.addCommand({
       id: "todo-workspace",
       name: "Switch to TODO workspace",
@@ -69,6 +72,40 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
       name: "Delete workspace",
       callback: () => this.deleteSavedWorkspace(),
     });
+  }
+
+  // Called once when Obsidian layout is ready (startup / reload)
+  async onStartup() {
+    const todayPath = `journal/${this.getTodayDateStr()}.md`;
+    const layout = this.app.workspace.getLayout();
+    let changed = false;
+
+    // Check if any leaf has a stale journal path
+    const check = (node) => {
+      if (!node) return;
+      if (node.type === "leaf" && node.state && node.state.state &&
+          typeof node.state.state.file === "string" &&
+          /^journal\/\d{4}-\d{2}-\d{2}\.md$/.test(node.state.state.file) &&
+          node.state.state.file !== todayPath) {
+        node.state.state.file = todayPath;
+        changed = true;
+      }
+      if (Array.isArray(node.children)) {
+        for (const child of node.children) check(child);
+      }
+    };
+
+    for (const key of Object.keys(layout)) {
+      check(layout[key]);
+    }
+
+    // Ensure today's journal exists and reset daily track
+    await this.ensureFile(todayPath);
+    await this.resetDailyTrackIfNeeded();
+
+    if (changed) {
+      await this.app.workspace.changeLayout(layout);
+    }
   }
 
   // Build YYYY-MM-DD string in local timezone
