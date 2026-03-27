@@ -42,4 +42,23 @@ npm run dev
 
 | Plugin | Description | Status |
 |--------|-------------|--------|
-| [workspace-switcher](./workspace-switcher/) | Switch between a TODO workspace (3 tracks + daily note) and a focus workspace (single panel) | v1.0.0 |
+| [workspace-switcher](./workspace-switcher/) | Manage workspaces: built-in TODO/Focus layouts, save/load/delete custom workspaces, auto-update daily notes | v1.1.0 |
+
+## Changelog
+
+### workspace-switcher
+
+#### v1.1.0 (2026-03-27)
+
+- **Save/Load/Delete custom workspaces** with fuzzy-search picker and full layout persistence (including sidebars)
+- **Auto-update daily notes on startup**: detects stale `journal/YYYY-MM-DD.md` paths and replaces with today's date
+- **Auto-update daily notes on workspace load**: same detection when loading a saved workspace
+- **Daily track auto-reset**: `tracks/daily.md` is archived and reset from template on new day
+- **Hide single-tab headers**: CSS removes tab bar when a pane has only one tab
+- Fix: daily track template reference (was pointing to non-existent file)
+- Fix: journal path in `ensureFile()` no longer uses TODO template for daily notes
+
+#### v1.0.0
+
+- Initial release: TODO workspace (3 tracks + daily note) and Focus workspace (single panel)
+
