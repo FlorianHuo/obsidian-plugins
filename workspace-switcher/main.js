@@ -313,7 +313,9 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
 
         // Update any journal/YYYY-MM-DD.md paths to today's date
         const todayPath = `journal/${this.getTodayDateStr()}.md`;
-        this.updateJournalPaths(layout, todayPath);
+        for (const key of Object.keys(layout)) {
+          this.updateJournalPaths(layout[key], todayPath);
+        }
 
         // Ensure today's daily note file exists
         await this.ensureFile(todayPath);
