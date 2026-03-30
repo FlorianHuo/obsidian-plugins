@@ -167,6 +167,27 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
       }
     }
 
+    // Move current.md content into urgent.md, then clear current.md
+    const currentFile =
+      this.app.vault.getAbstractFileByPath("tracks/current.md");
+    if (currentFile) {
+      const currentContent = await this.app.vault.read(currentFile);
+      if (currentContent.trim().length > 0) {
+        const urgentFile =
+          this.app.vault.getAbstractFileByPath("tracks/urgent.md");
+        if (urgentFile) {
+          const urgentContent = await this.app.vault.read(urgentFile);
+          const merged = urgentContent.trim().length > 0
+            ? urgentContent.trimEnd() + "\n" + currentContent.trim() + "\n"
+            : currentContent;
+          await this.app.vault.modify(urgentFile, merged);
+        } else {
+          await this.app.vault.create("tracks/urgent.md", currentContent);
+        }
+        await this.app.vault.modify(currentFile, "");
+      }
+    }
+
     // Reset daily track to template
     const templateContent = await this.app.vault.read(templateFile);
     if (dailyTrack) {
