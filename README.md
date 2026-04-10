@@ -42,11 +42,15 @@ npm run dev
 
 | Plugin | Description | Status |
 |--------|-------------|--------|
-| [workspace-switcher](./workspace-switcher/) | Manage workspaces: built-in TODO/Focus layouts, save/load/delete custom workspaces, auto-update daily notes | v1.1.0 |
+| [workspace-switcher](./workspace-switcher/) | Manage workspaces: built-in TODO/Focus layouts, save/load/delete custom workspaces, auto-update daily notes, instant task sorting on checkbox toggle | v1.1.0 |
 
 ## Changelog
 
 ### workspace-switcher
+
+#### Unreleased
+
+- Live Preview task sorting now runs immediately on native checkbox toggles, without relying on delayed vault modify events
 
 #### v1.1.0 (2026-03-27)
 
@@ -61,4 +65,3 @@ npm run dev
 #### v1.0.0
 
 - Initial release: TODO workspace (3 tracks + daily note) and Focus workspace (single panel)
-
