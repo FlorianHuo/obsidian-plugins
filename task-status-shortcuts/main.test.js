@@ -56,6 +56,20 @@ test("applyStatusToLine converts supported line shapes into in-progress tasks", 
   }
 });
 
+test("applyStatusToLine can set a line to done tasks", () => {
+  const cases = [
+    ["- [/] task", "- [x] task"],
+    ["- [ ] task", "- [x] task"],
+    ["- task", "- [x] task"],
+    ["task", "- [x] task"],
+    ["", "- [x] "],
+  ];
+
+  for (const [input, expected] of cases) {
+    assert.equal(applyStatusToLine(input, "x"), expected);
+  }
+});
+
 test("toggleStatusOnLine turns an in-progress marker back into an unchecked task", () => {
   const cases = [
     ["- [/] task", "- [ ] task"],
@@ -67,6 +81,20 @@ test("toggleStatusOnLine turns an in-progress marker back into an unchecked task
 
   for (const [input, expected] of cases) {
     assert.equal(toggleStatusOnLine(input, "/"), expected);
+  }
+});
+
+test("toggleStatusOnLine turns a done marker back into an unchecked task", () => {
+  const cases = [
+    ["- [x] task", "- [ ] task"],
+    ["1. [x] task", "1. [ ] task"],
+    ["[x] task", "[ ] task"],
+    ["- [x] ", "- [ ] "],
+    ["- [/] task", "- [x] task"],
+  ];
+
+  for (const [input, expected] of cases) {
+    assert.equal(toggleStatusOnLine(input, "x"), expected);
   }
 });
 
@@ -92,6 +120,21 @@ test("toggleTaskStatus turns an in-progress marker back into an unchecked task",
   });
 
   toggleTaskStatus(editor, "/");
+
+  assert.deepEqual(editor.lines, ["- [ ] task"]);
+  assert.deepEqual(editor.selection, {
+    from: { line: 0, ch: 6 },
+    to: { line: 0, ch: 6 },
+  });
+});
+
+test("toggleTaskStatus turns a done marker back into an unchecked task", () => {
+  const editor = createMockEditor(["- [x] task"], {
+    from: { line: 0, ch: 6 },
+    to: { line: 0, ch: 6 },
+  });
+
+  toggleTaskStatus(editor, "x");
 
   assert.deepEqual(editor.lines, ["- [ ] task"]);
   assert.deepEqual(editor.selection, {

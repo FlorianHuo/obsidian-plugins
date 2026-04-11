@@ -237,6 +237,21 @@ function ensureEditableMarkdownEditor(app) {
   return getActiveMarkdownEditor(app);
 }
 
+function runTaskStatusCommand(app, statusChar, isToggle) {
+  const editor = ensureEditableMarkdownEditor(app);
+  if (!editor) {
+    new NoticeClass("Open a Markdown note in editing mode to use this command.");
+    return;
+  }
+
+  if (isToggle) {
+    toggleTaskStatus(editor, statusChar);
+    return;
+  }
+
+  setTaskStatus(editor, statusChar);
+}
+
 class TaskStatusShortcutsPlugin extends PluginClass {
   async onload() {
     this.addCommand({
@@ -249,13 +264,21 @@ class TaskStatusShortcutsPlugin extends PluginClass {
         },
       ],
       callback: () => {
-        const editor = ensureEditableMarkdownEditor(this.app);
-        if (!editor) {
-          new NoticeClass("Open a Markdown note in editing mode to use this command.");
-          return;
-        }
+        runTaskStatusCommand(this.app, "/", true);
+      },
+    });
 
-        toggleTaskStatus(editor, "/");
+    this.addCommand({
+      id: "set-task-status-done",
+      name: "Set task status to done ([x])",
+      hotkeys: [
+        {
+          modifiers: ["Mod"],
+          key: "L",
+        },
+      ],
+      callback: () => {
+        runTaskStatusCommand(this.app, "x", true);
       },
     });
   }
@@ -270,3 +293,4 @@ module.exports.toggleTaskStatus = toggleTaskStatus;
 module.exports.getActiveMarkdownView = getActiveMarkdownView;
 module.exports.getActiveMarkdownEditor = getActiveMarkdownEditor;
 module.exports.ensureEditableMarkdownEditor = ensureEditableMarkdownEditor;
+module.exports.runTaskStatusCommand = runTaskStatusCommand;
