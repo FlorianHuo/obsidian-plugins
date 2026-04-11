@@ -42,7 +42,7 @@ npm run dev
 
 | Plugin | Description | Status |
 |--------|-------------|--------|
-| [workspace-switcher](./workspace-switcher/) | Manage workspaces: built-in TODO/Focus layouts, save/load/delete custom workspaces, auto-update daily notes, instant task sorting on checkbox toggle | v1.1.0 |
+| [workspace-switcher](./workspace-switcher/) | Manage workspaces: built-in TODO/Focus layouts, save/load/delete custom workspaces, auto-update daily notes in Beijing time, instant task sorting on checkbox toggle | v1.1.0 |
 
 ## Changelog
 
@@ -51,6 +51,8 @@ npm run dev
 #### Unreleased
 
 - Live Preview task sorting now runs immediately on native checkbox toggles, without relying on delayed vault modify events
+- Daily note paths and daily resets now use `Asia/Shanghai` instead of the computer's local timezone
+- While Obsidian stays open, the plugin checks for a new Beijing day every minute and refreshes the daily workspace state automatically
 
 #### v1.1.0 (2026-03-27)
 

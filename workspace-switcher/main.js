@@ -13,6 +13,9 @@
 const obsidian = require("obsidian");
 const { ChangeSet, EditorSelection, EditorState } = require("@codemirror/state");
 
+const DAILY_TIME_ZONE = "Asia/Shanghai";
+const DAILY_ROLLOVER_CHECK_INTERVAL_MS = 60 * 1000;
+
 // Modal for selecting a saved workspace from a fuzzy-search list
 class WorkspacePickerModal extends obsidian.FuzzySuggestModal {
   constructor(app, workspaceNames, onChoose) {
@@ -40,9 +43,17 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     // Load persisted data (tracks last reset date + saved workspaces)
     this.data = (await this.loadData()) || {};
     if (!this.data.workspaces) this.data.workspaces = {};
+    this.lastSeenDate = this.getTodayDateStr();
+    this.isDateRefreshInFlight = false;
 
     // On startup: update stale journal paths and reset daily track
-    this.app.workspace.onLayoutReady(() => this.onStartup());
+    this.app.workspace.onLayoutReady(() => void this.onStartup());
+    this.registerInterval(window.setInterval(() => {
+      void this.checkForDayRollover();
+    }, DAILY_ROLLOVER_CHECK_INTERVAL_MS));
+    this.registerDomEvent(window, "focus", () => {
+      void this.checkForDayRollover();
+    });
     this.registerEditorExtension(this.buildTaskSortExtension());
 
     this.addCommand({
@@ -84,7 +95,12 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
 
   // Called once when Obsidian layout is ready (startup / reload)
   async onStartup() {
-    const todayPath = `journal/${this.getTodayDateStr()}.md`;
+    await this.syncDailyState();
+  }
+
+  async syncDailyState() {
+    const today = this.getTodayDateStr();
+    const todayPath = `journal/${today}.md`;
     const layout = this.app.workspace.getLayout();
     let changed = false;
 
@@ -114,15 +130,39 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     if (changed) {
       await this.app.workspace.changeLayout(layout);
     }
+
+    this.lastSeenDate = today;
   }
 
-  // Build YYYY-MM-DD string in local timezone
+  async checkForDayRollover() {
+    const today = this.getTodayDateStr();
+    if (today === this.lastSeenDate || this.isDateRefreshInFlight) return;
+
+    this.isDateRefreshInFlight = true;
+    try {
+      await this.syncDailyState();
+    } finally {
+      this.isDateRefreshInFlight = false;
+    }
+  }
+
+  // Build YYYY-MM-DD string in the configured daily timezone.
   getTodayDateStr() {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, "0");
-    const d = String(now.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: DAILY_TIME_ZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+
+    const dateParts = {};
+    for (const part of parts) {
+      if (part.type !== "literal") {
+        dateParts[part.type] = part.value;
+      }
+    }
+
+    return `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
   }
 
   // Ensure a file exists; create it if missing
