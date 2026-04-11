@@ -3,7 +3,7 @@
   "name": "Task Status Shortcuts",
   "version": "0.1.0",
   "minAppVersion": "1.5.0",
-  "description": "Adds a command and default shortcut to set task status to in progress ([/]).",
+  "description": "Adds a command and default shortcut to toggle task status to in progress ([/]).",
   "author": "Florian",
   "isDesktopOnly": false
 }

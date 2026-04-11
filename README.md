@@ -42,7 +42,7 @@ npm run dev
 
 | Plugin | Description | Status |
 |--------|-------------|--------|
-| [task-status-shortcuts](./task-status-shortcuts/) | Add an editor command and default shortcut to set the current line or selection to in-progress task status `[/]` | v0.1.0 |
+| [task-status-shortcuts](./task-status-shortcuts/) | Add an editor command and default shortcut to toggle the current line or selection into in-progress task status `[/]` | v0.1.0 |
 | [workspace-switcher](./workspace-switcher/) | Manage workspaces: built-in TODO/Focus layouts, save/load/delete custom workspaces, auto-update daily notes in Beijing time, instant task sorting on checkbox toggle | v1.1.0 |
 
 ## Changelog
@@ -54,6 +54,7 @@ npm run dev
 - Add `Set task status to in progress ([/])` for the active line or current multi-line selection
 - Add default hotkey `Mod+/`
 - Convert existing task items, list items, plain text, and blank lines into Things-compatible `[/]` task syntax
+- Press the same shortcut again on `[/]` items to clear the in-progress marker while keeping the current list shape
 
 ### workspace-switcher
 

@@ -52,6 +52,23 @@ function createBlankTask(indent, statusChar) {
   };
 }
 
+function createMarkerCleared(prefix, oldMarker, suffix) {
+  const trimmedSuffix = suffix.startsWith(" ") ? suffix.slice(1) : suffix;
+  const removedStart = prefix.length;
+  const removedLength = `[${oldMarker}]`.length + (suffix.startsWith(" ") ? 1 : 0);
+  const removedEnd = removedStart + removedLength;
+  const updatedLine = `${prefix}${trimmedSuffix}`;
+
+  return {
+    line: updatedLine,
+    mapColumn(ch) {
+      if (ch <= removedStart) return ch;
+      if (ch <= removedEnd) return removedStart;
+      return ch - removedLength;
+    },
+  };
+}
+
 function createPrefixedTask(indent, content, statusChar) {
   const prefix = `- [${statusChar}] `;
   const updatedLine = `${indent}${prefix}${content}`;
@@ -106,6 +123,24 @@ function applyStatusToLine(line, statusChar) {
   return transformLine(line, statusChar).line;
 }
 
+function transformToggledLine(line, statusChar) {
+  const taskItemMatch = line.match(TASK_ITEM_RE);
+  if (taskItemMatch && taskItemMatch[2] === statusChar) {
+    return createMarkerCleared(taskItemMatch[1], taskItemMatch[2], taskItemMatch[3]);
+  }
+
+  const bareTaskMatch = line.match(BARE_TASK_RE);
+  if (bareTaskMatch && bareTaskMatch[2] === statusChar) {
+    return createMarkerCleared(bareTaskMatch[1], bareTaskMatch[2], bareTaskMatch[3]);
+  }
+
+  return transformLine(line, statusChar);
+}
+
+function toggleStatusOnLine(line, statusChar) {
+  return transformToggledLine(line, statusChar).line;
+}
+
 function getSelectedLineRange(editor) {
   const from = editor.getCursor("from");
   const to = editor.getCursor("to");
@@ -131,13 +166,13 @@ function remapPosition(position, startLine, transformedLines) {
   };
 }
 
-function setTaskStatus(editor, statusChar) {
+function updateEditorLines(editor, lineTransformer) {
   const { from, to, isSelection, startLine, endLine } = getSelectedLineRange(editor);
   const transformedLines = [];
 
   for (let lineNumber = startLine; lineNumber <= endLine; lineNumber += 1) {
     const currentLine = editor.getLine(lineNumber);
-    const transformed = transformLine(currentLine, statusChar);
+    const transformed = lineTransformer(currentLine);
     transformedLines.push(transformed);
     if (transformed.line !== currentLine) {
       editor.setLine(lineNumber, transformed.line);
@@ -155,6 +190,14 @@ function setTaskStatus(editor, statusChar) {
   editor.setSelection(mappedFrom, mappedTo);
 }
 
+function setTaskStatus(editor, statusChar) {
+  updateEditorLines(editor, (line) => transformLine(line, statusChar));
+}
+
+function toggleTaskStatus(editor, statusChar) {
+  updateEditorLines(editor, (line) => transformToggledLine(line, statusChar));
+}
+
 class TaskStatusShortcutsPlugin extends PluginClass {
   async onload() {
     this.addCommand({
@@ -167,7 +210,7 @@ class TaskStatusShortcutsPlugin extends PluginClass {
         },
       ],
       editorCallback: (editor) => {
-        setTaskStatus(editor, "/");
+        toggleTaskStatus(editor, "/");
       },
     });
   }
@@ -177,3 +220,5 @@ module.exports = TaskStatusShortcutsPlugin;
 module.exports.default = TaskStatusShortcutsPlugin;
 module.exports.applyStatusToLine = applyStatusToLine;
 module.exports.setTaskStatus = setTaskStatus;
+module.exports.toggleStatusOnLine = toggleStatusOnLine;
+module.exports.toggleTaskStatus = toggleTaskStatus;

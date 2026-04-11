@@ -1,7 +1,12 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { applyStatusToLine, setTaskStatus } = require("./main.js");
+const {
+  applyStatusToLine,
+  setTaskStatus,
+  toggleStatusOnLine,
+  toggleTaskStatus,
+} = require("./main.js");
 
 function createMockEditor(lines, selection) {
   return {
@@ -51,6 +56,20 @@ test("applyStatusToLine converts supported line shapes into in-progress tasks", 
   }
 });
 
+test("toggleStatusOnLine clears an existing in-progress marker and preserves the current list shape", () => {
+  const cases = [
+    ["- [/] task", "- task"],
+    ["1. [/] task", "1. task"],
+    ["[/] task", "task"],
+    ["- [/] ", "- "],
+    ["- [x] task", "- [/] task"],
+  ];
+
+  for (const [input, expected] of cases) {
+    assert.equal(toggleStatusOnLine(input, "/"), expected);
+  }
+});
+
 test("setTaskStatus updates the current line and keeps the cursor near the original content", () => {
   const editor = createMockEditor(["task"], {
     from: { line: 0, ch: 2 },
@@ -66,19 +85,34 @@ test("setTaskStatus updates the current line and keeps the cursor near the origi
   });
 });
 
-test("setTaskStatus applies line-by-line across a selection without touching the trailing line at ch 0", () => {
+test("toggleTaskStatus clears an in-progress marker and keeps the cursor aligned with the content", () => {
+  const editor = createMockEditor(["- [/] task"], {
+    from: { line: 0, ch: 6 },
+    to: { line: 0, ch: 6 },
+  });
+
+  toggleTaskStatus(editor, "/");
+
+  assert.deepEqual(editor.lines, ["- task"]);
+  assert.deepEqual(editor.selection, {
+    from: { line: 0, ch: 2 },
+    to: { line: 0, ch: 2 },
+  });
+});
+
+test("toggleTaskStatus applies line-by-line across a selection without touching the trailing line at ch 0", () => {
   const editor = createMockEditor(
-    ["- task", "plain text", "leave alone"],
+    ["- [/] task", "plain text", "leave alone"],
     {
       from: { line: 0, ch: 0 },
       to: { line: 2, ch: 0 },
     }
   );
 
-  setTaskStatus(editor, "/");
+  toggleTaskStatus(editor, "/");
 
   assert.deepEqual(editor.lines, [
-    "- [/] task",
+    "- task",
     "- [/] plain text",
     "leave alone",
   ]);
