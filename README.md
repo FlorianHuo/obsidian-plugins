@@ -42,8 +42,8 @@ npm run dev
 
 | Plugin | Description | Status |
 |--------|-------------|--------|
-| [task-status-shortcuts](./task-status-shortcuts/) | Add editor commands and default shortcuts to set task status to in-progress `[/]` or done `[x]` | v0.1.0 |
-| [workspace-switcher](./workspace-switcher/) | Manage workspaces: built-in TODO/Focus layouts, save/load/delete custom workspaces, auto-update daily notes in Beijing time, instant task sorting on checkbox toggle | v1.1.0 |
+| [task-status-shortcuts](./task-status-shortcuts/) | Add task status shortcuts plus editor task sorting for Things-style workflows | v0.1.0 |
+| [workspace-switcher](./workspace-switcher/) | Manage workspaces: built-in TODO/Focus layouts, save/load/delete custom workspaces, auto-update daily notes in Beijing time | v1.1.0 |
 
 ## Changelog
 
@@ -54,6 +54,9 @@ npm run dev
 - Add `Set task status to in progress ([/])` for the active line or current multi-line selection
 - Add default hotkey `Mod+/`
 - Add `Set task status to done ([x])` with default hotkey `Mod+L`
+- Auto-sort native checkbox toggles and `Set task status to done ([x])` so completed tasks move to the bottom of the current branch
+- Auto-sort `Set task status to in progress ([/])` so the current task moves to the top of the current branch
+- Add `Sort tasks in current file`
 - Convert existing task items, list items, plain text, and blank lines into Things-compatible `[/]` task syntax
 - Press the same shortcut again on `[/]` or `[x]` items to turn them back into unchecked tasks `[ ]`
 
@@ -61,9 +64,9 @@ npm run dev
 
 #### Unreleased
 
-- Live Preview task sorting now runs immediately on native checkbox toggles, without relying on delayed vault modify events
 - Daily note paths and daily resets now use `Asia/Shanghai` instead of the computer's local timezone
 - While Obsidian stays open, the plugin checks for a new Beijing day every minute and refreshes the daily workspace state automatically
+- Editor task sorting moved out to `task-status-shortcuts`, so this plugin only owns workspace and daily-layout behavior
 
 #### v1.1.0 (2026-03-27)
 

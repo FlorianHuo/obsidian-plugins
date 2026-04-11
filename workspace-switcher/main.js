@@ -11,7 +11,112 @@
 // only modifies the "main" area of the layout.
 
 const obsidian = require("obsidian");
-const { ChangeSet, EditorSelection, EditorState } = require("@codemirror/state");
+
+const TASK_LINE_RE = /^(\s*)-\s*\[([^\]])\]/;
+
+function getIndent(line) {
+  const match = line.match(/^(\s*)/);
+  return match ? match[1] : "";
+}
+
+function parseTaskTokens(lines, startIndex, baseIndent) {
+  const tokens = [];
+  let i = startIndex;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (line.trim() === "") {
+      let j = i + 1;
+      while (j < lines.length && lines[j].trim() === "") j++;
+      if (j < lines.length) {
+        const nextTaskMatch = lines[j].match(TASK_LINE_RE);
+        const nextIndent = getIndent(lines[j]);
+        if (
+          (nextTaskMatch && nextTaskMatch[1] === baseIndent) ||
+          nextIndent.length > baseIndent.length
+        ) {
+          tokens.push({ type: "blank", lines: lines.slice(i, j) });
+          i = j;
+          continue;
+        }
+      }
+      break;
+    }
+
+    const taskMatch = line.match(TASK_LINE_RE);
+    if (taskMatch && taskMatch[1] === baseIndent) {
+      const taskLines = [line];
+      const isCompleted = taskMatch[2].toLowerCase() === "x";
+      i += 1;
+
+      while (i < lines.length) {
+        if (lines[i].trim() === "") break;
+        const indent = getIndent(lines[i]);
+        if (indent.length > baseIndent.length) {
+          taskLines.push(lines[i]);
+          i += 1;
+        } else {
+          break;
+        }
+      }
+
+      tokens.push({ type: "task", isCompleted, lines: taskLines });
+      continue;
+    }
+
+    break;
+  }
+
+  return { tokens, nextIndex: i };
+}
+
+function removeCompletedContent(content) {
+  const lines = content.split("\n");
+  const newLines = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    if (TASK_LINE_RE.test(lines[i])) {
+      const match = lines[i].match(/^(\s*)-\s*\[/);
+      const baseIndent = match[1];
+      const { tokens, nextIndex } = parseTaskTokens(lines, i, baseIndent);
+      i = nextIndex;
+
+      let prevWasDroppedTask = false;
+      for (const token of tokens) {
+        if (token.type === "task") {
+          if (!token.isCompleted) {
+            prevWasDroppedTask = false;
+            if (token.lines.length > 1) {
+              const head = token.lines[0];
+              const tail = token.lines.slice(1).join("\n");
+              const processedTail = removeCompletedContent(tail);
+              newLines.push(head);
+              if (processedTail !== "") {
+                newLines.push(...processedTail.split("\n"));
+              }
+            } else {
+              newLines.push(...token.lines);
+            }
+          } else {
+            prevWasDroppedTask = true;
+          }
+        } else {
+          if (!prevWasDroppedTask) {
+            newLines.push(...token.lines);
+          }
+          prevWasDroppedTask = false;
+        }
+      }
+    } else {
+      newLines.push(lines[i]);
+      i += 1;
+    }
+  }
+
+  return newLines.join("\n");
+}
 
 const DAILY_TIME_ZONE = "Asia/Shanghai";
 const DAILY_ROLLOVER_CHECK_INTERVAL_MS = 60 * 1000;
@@ -54,18 +159,11 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     this.registerDomEvent(window, "focus", () => {
       void this.checkForDayRollover();
     });
-    this.registerEditorExtension(this.buildTaskSortExtension());
 
     this.addCommand({
       id: "todo-workspace",
       name: "Switch to TODO workspace",
       callback: () => this.switchToTodoWorkspace(),
-    });
-
-    this.addCommand({
-      id: "sort-current-file",
-      name: "Sort tasks in current file",
-      callback: () => this.sortCurrentFile(),
     });
 
     this.addCommand({
@@ -183,8 +281,6 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
   }
 
   // Reset tracks/daily.md to the template if a new day has started.
-  // Before resetting, archives the previous content to tracks/daily-log.md
-  // so the user can track their habit completion history.
   async resetDailyTrackIfNeeded() {
     const today = this.getTodayDateStr();
     if (this.data.lastDailyReset === today) return;
@@ -195,25 +291,6 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
 
     const dailyTrack =
       this.app.vault.getAbstractFileByPath("tracks/daily.md");
-
-    // Archive the previous day's completion state before resetting
-    if (dailyTrack) {
-      const oldContent = await this.app.vault.read(dailyTrack);
-      // Only archive if there is actual content
-      if (oldContent.trim().length > 0) {
-        const archiveDate = this.data.lastDailyReset || "unknown";
-        const entry = `## ${archiveDate}\n${oldContent.trim()}\n\n`;
-        const logPath = "tracks/daily-log.md";
-        const logFile = this.app.vault.getAbstractFileByPath(logPath);
-        if (logFile) {
-          const existing = await this.app.vault.read(logFile);
-          // Prepend new entry so most recent is at the top
-          await this.app.vault.modify(logFile, entry + existing);
-        } else {
-          await this.app.vault.create(logPath, entry);
-        }
-      }
-    }
 
     // Keep uncompleted tasks in current.md and remove completed ones
     const currentFile =
@@ -238,402 +315,8 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     await this.saveData(this.data);
   }
 
-  parseTokens(lines, startIndex, baseIndent) {
-    const tokens = [];
-    let i = startIndex;
-    while (i < lines.length) {
-      const line = lines[i];
-      
-      if (line.trim() === '') {
-        let j = i + 1;
-        while (j < lines.length && lines[j].trim() === '') j++;
-        if (j < lines.length) {
-          const nextTaskMatch = lines[j].match(/^(\s*)-\s*\[([xX ])\]/);
-          const nextIndentMatch = lines[j].match(/^(\s*)/);
-          const nextIndent = nextIndentMatch ? nextIndentMatch[1] : "";
-          if ((nextTaskMatch && nextTaskMatch[1] === baseIndent) || nextIndent.length > baseIndent.length) {
-            tokens.push({ type: "blank", lines: lines.slice(i, j) });
-            i = j;
-            continue;
-          }
-        }
-        break;
-      }
-      
-      const taskMatch = line.match(/^(\s*)-\s*\[([xX ])\]/);
-      if (taskMatch && taskMatch[1] === baseIndent) {
-        const isCompleted = taskMatch[2].toLowerCase() === 'x';
-        const taskLines = [line];
-        i++;
-        while (i < lines.length) {
-          if (lines[i].trim() === '') break;
-          const indentMatch = lines[i].match(/^(\s*)/);
-          if (indentMatch && indentMatch[1].length > baseIndent.length) {
-            taskLines.push(lines[i]);
-            i++;
-          } else {
-            break;
-          }
-        }
-        tokens.push({ type: "task", isCompleted, lines: taskLines });
-        continue;
-      }
-      
-      break;
-    }
-    return { tokens, nextIndex: i };
-  }
-
   removeCompleted(content) {
-    const lines = content.split('\n');
-    const newLines = [];
-    const isTask = (line) => /^(\s*)-\s*\[[xX ]\]/.test(line);
-    
-    let i = 0;
-    while (i < lines.length) {
-      if (isTask(lines[i])) {
-        const match = lines[i].match(/^(\s*)-\s*\[/);
-        const baseIndent = match[1];
-        
-        const { tokens, nextIndex } = this.parseTokens(lines, i, baseIndent);
-        i = nextIndex;
-        
-        let prevWasDroppedTask = false;
-        for (const tok of tokens) {
-          if (tok.type === "task") {
-            if (!tok.isCompleted) {
-              prevWasDroppedTask = false;
-              if (tok.lines.length > 1) {
-                const head = tok.lines[0];
-                const tail = tok.lines.slice(1).join('\n');
-                const processedTail = this.removeCompleted(tail);
-                newLines.push(head);
-                if (processedTail !== "") newLines.push(...processedTail.split('\n'));
-              } else {
-                newLines.push(...tok.lines);
-              }
-            } else {
-              prevWasDroppedTask = true;
-            }
-          } else {
-            if (!prevWasDroppedTask) {
-              newLines.push(...tok.lines);
-            }
-            prevWasDroppedTask = false;
-          }
-        }
-      } else {
-        newLines.push(lines[i]);
-        i++;
-      }
-    }
-    return newLines.join('\n');
-  }
-
-  sortContent(content) {
-    const lines = content.split('\n');
-    const newLines = [];
-    const isTask = (line) => /^(\s*)-\s*\[[xX ]\]/.test(line);
-    
-    let i = 0;
-    while (i < lines.length) {
-      if (isTask(lines[i])) {
-        const match = lines[i].match(/^(\s*)-\s*\[/);
-        const baseIndent = match[1];
-        
-        const { tokens, nextIndex } = this.parseTokens(lines, i, baseIndent);
-        i = nextIndex;
-        
-        const tasks = tokens.filter(t => t.type === "task");
-        const incomplete = tasks.filter(t => !t.isCompleted);
-        const complete = tasks.filter(t => t.isCompleted);
-        const sortedTasks = [...incomplete, ...complete];
-        
-        let taskIdx = 0;
-        for (const tok of tokens) {
-          if (tok.type === "task") {
-            const t = sortedTasks[taskIdx];
-            taskIdx++;
-            if (t.lines.length > 1) {
-              const head = t.lines[0];
-              const tail = t.lines.slice(1).join('\n');
-              const sortedTail = this.sortContent(tail);
-              newLines.push(head);
-              if (sortedTail !== "") newLines.push(...sortedTail.split('\n'));
-            } else {
-              newLines.push(...t.lines);
-            }
-          } else {
-            newLines.push(...tok.lines);
-          }
-        }
-      } else {
-        newLines.push(lines[i]);
-        i++;
-      }
-    }
-    return newLines.join('\n');
-  }
-
-  buildTaskSortExtension() {
-    return EditorState.transactionFilter.of((tr) => {
-      const toggle = this.getCheckboxToggleInfo(tr);
-      if (!toggle) return tr;
-
-      const region = this.findSortableTaskRegion(tr.newDoc, toggle.lineNumber);
-      if (!region) return tr;
-
-      const regionText = tr.newDoc.sliceString(region.from, region.to);
-      const sortedRegion = this.sortContent(regionText);
-      if (sortedRegion === regionText) return tr;
-
-      const replacement = ChangeSet.of(
-        [{ from: region.from, to: region.to, insert: sortedRegion }],
-        tr.newDoc.length
-      );
-      const mappedSelection = tr.newSelection.map(replacement);
-      const finalSelection = this.remapSelectionIntoSortedTask(
-        tr.newSelection,
-        mappedSelection,
-        region,
-        regionText,
-        sortedRegion,
-        toggle.pos
-      );
-
-      return [
-        tr,
-        {
-          sequential: true,
-          changes: [{ from: region.from, to: region.to, insert: sortedRegion }],
-          selection: finalSelection,
-        },
-      ];
-    });
-  }
-
-  getCheckboxToggleInfo(tr) {
-    if (!tr.docChanged) return null;
-
-    const toggles = [];
-    let isValidToggle = true;
-
-    tr.changes.iterChanges((fromA, toA, fromB) => {
-      if (!isValidToggle) return;
-
-      const oldLine = tr.startState.doc.lineAt(fromA);
-      const newLine = tr.newDoc.lineAt(fromB);
-      if (!this.isCheckboxToggleLineChange(oldLine.text, newLine.text)) {
-        isValidToggle = false;
-        return;
-      }
-
-      toggles.push({
-        lineNumber: newLine.number,
-        pos: newLine.from,
-      });
-    });
-
-    if (!isValidToggle || toggles.length !== 1) return null;
-    return toggles[0];
-  }
-
-  isCheckboxToggleLineChange(oldLine, newLine) {
-    const oldTask = this.matchTaskLine(oldLine);
-    const newTask = this.matchTaskLine(newLine);
-    if (!oldTask || !newTask) return false;
-
-    const oldParts = oldLine.match(/^(\s*-\s*\[)([xX ])\](.*)$/);
-    const newParts = newLine.match(/^(\s*-\s*\[)([xX ])\](.*)$/);
-    if (!oldParts || !newParts) return false;
-
-    if (oldParts[1] !== newParts[1] || oldParts[3] !== newParts[3]) return false;
-
-    const oldMarker = oldParts[2].toLowerCase();
-    const newMarker = newParts[2].toLowerCase();
-    return (
-      (oldMarker === " " && newMarker === "x") ||
-      (oldMarker === "x" && newMarker === " ")
-    );
-  }
-
-  findSortableTaskRegion(doc, lineNumber) {
-    const line = doc.line(lineNumber);
-    const taskMatch = this.matchTaskLine(line.text);
-    if (!taskMatch) return null;
-
-    const baseIndent = taskMatch[1];
-    const baseIndentLen = baseIndent.length;
-    let start = lineNumber;
-
-    while (start > 1) {
-      const prev = doc.line(start - 1);
-      const prevTask = this.matchTaskLine(prev.text);
-      const prevIndent = this.getIndent(prev.text);
-
-      if (prev.text.trim() === "") {
-        start--;
-        continue;
-      }
-
-      if (prevIndent.length > baseIndentLen) {
-        start--;
-        continue;
-      }
-
-      if (prevTask && prevTask[1] === baseIndent) {
-        start--;
-        continue;
-      }
-
-      break;
-    }
-
-    while (start <= lineNumber) {
-      const startTask = this.matchTaskLine(doc.line(start).text);
-      if (startTask && startTask[1] === baseIndent) break;
-      start++;
-    }
-
-    let end = lineNumber;
-    while (end < doc.lines) {
-      const next = doc.line(end + 1);
-      const nextTask = this.matchTaskLine(next.text);
-      const nextIndent = this.getIndent(next.text);
-
-      if (next.text.trim() === "") {
-        end++;
-        continue;
-      }
-
-      if (nextIndent.length > baseIndentLen) {
-        end++;
-        continue;
-      }
-
-      if (nextTask && nextTask[1] === baseIndent) {
-        end++;
-        continue;
-      }
-
-      break;
-    }
-
-    while (end >= start && doc.line(end).text.trim() === "") {
-      end--;
-    }
-
-    if (end < start) return null;
-
-    return {
-      from: doc.line(start).from,
-      to: end < doc.lines ? doc.line(end + 1).from : doc.line(end).to,
-      baseIndent,
-    };
-  }
-
-  remapSelectionIntoSortedTask(originalSelection, mappedSelection, region, regionText, sortedRegion, toggledPos) {
-    const oldTasks = this.collectTaskBlocks(regionText, region.baseIndent);
-    const newTasks = this.collectTaskBlocks(sortedRegion, region.baseIndent);
-    const relativeTogglePos = toggledPos - region.from;
-    const oldTask = oldTasks.find((task) => relativeTogglePos >= task.from && relativeTogglePos <= task.to);
-
-    if (!oldTask) return mappedSelection;
-
-    const newTask = newTasks.find((task) => {
-      return task.text === oldTask.text && task.occurrence === oldTask.occurrence;
-    });
-    if (!newTask) return mappedSelection;
-
-    const originalMain = originalSelection.main;
-    const oldTaskFrom = region.from + oldTask.from;
-    const oldTaskTo = region.from + oldTask.to;
-    if (
-      originalMain.anchor < oldTaskFrom ||
-      originalMain.anchor > oldTaskTo ||
-      originalMain.head < oldTaskFrom ||
-      originalMain.head > oldTaskTo
-    ) {
-      return mappedSelection;
-    }
-
-    const newTaskFrom = region.from + newTask.from;
-    const newTaskTo = region.from + newTask.to;
-    const anchor = this.mapPosIntoTask(originalMain.anchor, oldTaskFrom, oldTaskTo, newTaskFrom, newTaskTo);
-    const head = this.mapPosIntoTask(originalMain.head, oldTaskFrom, oldTaskTo, newTaskFrom, newTaskTo);
-
-    const ranges = mappedSelection.ranges.slice();
-    ranges[mappedSelection.mainIndex] = EditorSelection.range(
-      anchor,
-      head,
-      originalMain.goalColumn,
-      originalMain.bidiLevel,
-      originalMain.assoc
-    );
-
-    return EditorSelection.create(ranges, mappedSelection.mainIndex);
-  }
-
-  collectTaskBlocks(regionText, baseIndent) {
-    const lines = regionText.split('\n');
-    const { tokens } = this.parseTokens(lines, 0, baseIndent);
-    const tasks = [];
-    const seen = new Map();
-    let offset = 0;
-    let consumedLines = 0;
-
-    for (const token of tokens) {
-      const text = token.lines.join('\n');
-      if (token.type === "task") {
-        const occurrence = seen.get(text) || 0;
-        seen.set(text, occurrence + 1);
-        tasks.push({
-          from: offset,
-          to: offset + text.length,
-          text,
-          occurrence,
-        });
-      }
-
-      offset += text.length;
-      consumedLines += token.lines.length;
-      if (consumedLines < lines.length) {
-        offset += 1;
-      }
-    }
-
-    return tasks;
-  }
-
-  mapPosIntoTask(pos, oldFrom, oldTo, newFrom, newTo) {
-    const oldLength = Math.max(0, oldTo - oldFrom);
-    const newLength = Math.max(0, newTo - newFrom);
-    const offset = Math.min(Math.max(pos - oldFrom, 0), oldLength);
-    return newFrom + Math.min(offset, newLength);
-  }
-
-  matchTaskLine(line) {
-    return line.match(/^(\s*)-\s*\[[xX ]\]/);
-  }
-
-  getIndent(line) {
-    const match = line.match(/^(\s*)/);
-    return match ? match[1] : "";
-  }
-
-  async sortCurrentFile(silent = false) {
-    const file = this.app.workspace.getActiveFile();
-    if (!file || file.extension !== "md") return;
-
-    const content = await this.app.vault.read(file);
-    const sorted = this.sortContent(content);
-
-    if (sorted !== content) {
-      await this.app.vault.process(file, (data) => this.sortContent(data));
-      if (!silent) new obsidian.Notice("Tasks auto-sorted (completed items moved to bottom)");
-    } else {
-      if (!silent) new obsidian.Notice("No sort required: already up to date");
-    }
+    return removeCompletedContent(content);
   }
 
   async switchToTodoWorkspace() {

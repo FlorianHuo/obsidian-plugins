@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   applyStatusToLine,
+  applyTaskStatusCommandToEditor,
   setTaskStatus,
   toggleStatusOnLine,
   toggleTaskStatus,
@@ -21,6 +22,9 @@ function createMockEditor(lines, selection) {
     },
     getLine(line) {
       return this.lines[line];
+    },
+    lineCount() {
+      return this.lines.length;
     },
     setLine(line, value) {
       this.lines[line] = value;
@@ -162,5 +166,49 @@ test("toggleTaskStatus applies line-by-line across a selection without touching 
   assert.deepEqual(editor.selection, {
     from: { line: 0, ch: 0 },
     to: { line: 2, ch: 0 },
+  });
+});
+
+test("applyTaskStatusCommandToEditor moves an in-progress task to the front of its current branch", () => {
+  const editor = createMockEditor(
+    ["- [ ] later", "- [ ] now", "- [x] done"],
+    {
+      from: { line: 1, ch: 4 },
+      to: { line: 1, ch: 4 },
+    }
+  );
+
+  applyTaskStatusCommandToEditor(editor, "/", true);
+
+  assert.deepEqual(editor.lines, [
+    "- [/] now",
+    "- [ ] later",
+    "- [x] done",
+  ]);
+  assert.deepEqual(editor.selection, {
+    from: { line: 0, ch: 4 },
+    to: { line: 0, ch: 4 },
+  });
+});
+
+test("applyTaskStatusCommandToEditor moves a done task to the bottom of its current branch", () => {
+  const editor = createMockEditor(
+    ["- [/] now", "- [ ] later", "- [x] done"],
+    {
+      from: { line: 0, ch: 6 },
+      to: { line: 0, ch: 6 },
+    }
+  );
+
+  applyTaskStatusCommandToEditor(editor, "x", true);
+
+  assert.deepEqual(editor.lines, [
+    "- [ ] later",
+    "- [x] done",
+    "- [x] now",
+  ]);
+  assert.deepEqual(editor.selection, {
+    from: { line: 2, ch: 6 },
+    to: { line: 2, ch: 6 },
   });
 });
