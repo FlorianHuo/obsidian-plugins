@@ -204,18 +204,44 @@ function toggleTaskStatus(editor, statusChar) {
   updateEditorLines(editor, (line) => transformToggledLine(line, statusChar));
 }
 
-function getActiveMarkdownEditor(app) {
+function getActiveMarkdownView(app) {
   if (!app || !app.workspace || typeof app.workspace.getActiveViewOfType !== "function") {
     return null;
   }
 
-  const view = app.workspace.getActiveViewOfType(MarkdownViewClass);
+  const activeView = app.workspace.getActiveViewOfType(MarkdownViewClass);
+  if (activeView) return activeView;
+
+  if (typeof app.workspace.getMostRecentLeaf === "function") {
+    const leaf = app.workspace.getMostRecentLeaf();
+    if (leaf && leaf.view instanceof MarkdownViewClass) {
+      return leaf.view;
+    }
+  }
+
+  return null;
+}
+
+function getActiveMarkdownEditor(app) {
+  const view = getActiveMarkdownView(app);
   if (!view) return null;
   if (typeof view.getMode === "function" && view.getMode() !== "source") {
     return null;
   }
 
   return view.editor || null;
+}
+
+function ensureEditableMarkdownEditor(app) {
+  const view = getActiveMarkdownView(app);
+  if (!view) return null;
+
+  if (typeof view.getMode === "function" && view.getMode() === "preview") {
+    app.commands.executeCommandById("markdown:toggle-preview");
+  }
+
+  app.commands.executeCommandById("editor:focus");
+  return getActiveMarkdownEditor(app);
 }
 
 class TaskStatusShortcutsPlugin extends PluginClass {
@@ -230,7 +256,7 @@ class TaskStatusShortcutsPlugin extends PluginClass {
         },
       ],
       callback: () => {
-        const editor = getActiveMarkdownEditor(this.app);
+        const editor = ensureEditableMarkdownEditor(this.app);
         if (!editor) {
           new NoticeClass("Open a Markdown note in editing mode to use this command.");
           return;
@@ -248,4 +274,6 @@ module.exports.applyStatusToLine = applyStatusToLine;
 module.exports.setTaskStatus = setTaskStatus;
 module.exports.toggleStatusOnLine = toggleStatusOnLine;
 module.exports.toggleTaskStatus = toggleTaskStatus;
+module.exports.getActiveMarkdownView = getActiveMarkdownView;
 module.exports.getActiveMarkdownEditor = getActiveMarkdownEditor;
+module.exports.ensureEditableMarkdownEditor = ensureEditableMarkdownEditor;
