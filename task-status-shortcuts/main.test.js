@@ -56,12 +56,12 @@ test("applyStatusToLine converts supported line shapes into in-progress tasks", 
   }
 });
 
-test("toggleStatusOnLine clears an existing in-progress marker and preserves the current list shape", () => {
+test("toggleStatusOnLine turns an in-progress marker back into an unchecked task", () => {
   const cases = [
-    ["- [/] task", "- task"],
-    ["1. [/] task", "1. task"],
-    ["[/] task", "task"],
-    ["- [/] ", "- "],
+    ["- [/] task", "- [ ] task"],
+    ["1. [/] task", "1. [ ] task"],
+    ["[/] task", "[ ] task"],
+    ["- [/] ", "- [ ] "],
     ["- [x] task", "- [/] task"],
   ];
 
@@ -85,7 +85,7 @@ test("setTaskStatus updates the current line and keeps the cursor near the origi
   });
 });
 
-test("toggleTaskStatus clears an in-progress marker and keeps the cursor aligned with the content", () => {
+test("toggleTaskStatus turns an in-progress marker back into an unchecked task", () => {
   const editor = createMockEditor(["- [/] task"], {
     from: { line: 0, ch: 6 },
     to: { line: 0, ch: 6 },
@@ -93,10 +93,10 @@ test("toggleTaskStatus clears an in-progress marker and keeps the cursor aligned
 
   toggleTaskStatus(editor, "/");
 
-  assert.deepEqual(editor.lines, ["- task"]);
+  assert.deepEqual(editor.lines, ["- [ ] task"]);
   assert.deepEqual(editor.selection, {
-    from: { line: 0, ch: 2 },
-    to: { line: 0, ch: 2 },
+    from: { line: 0, ch: 6 },
+    to: { line: 0, ch: 6 },
   });
 });
 
@@ -112,7 +112,7 @@ test("toggleTaskStatus applies line-by-line across a selection without touching 
   toggleTaskStatus(editor, "/");
 
   assert.deepEqual(editor.lines, [
-    "- task",
+    "- [ ] task",
     "- [/] plain text",
     "leave alone",
   ]);

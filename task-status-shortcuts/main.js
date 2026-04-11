@@ -58,23 +58,6 @@ function createBlankTask(indent, statusChar) {
   };
 }
 
-function createMarkerCleared(prefix, oldMarker, suffix) {
-  const trimmedSuffix = suffix.startsWith(" ") ? suffix.slice(1) : suffix;
-  const removedStart = prefix.length;
-  const removedLength = `[${oldMarker}]`.length + (suffix.startsWith(" ") ? 1 : 0);
-  const removedEnd = removedStart + removedLength;
-  const updatedLine = `${prefix}${trimmedSuffix}`;
-
-  return {
-    line: updatedLine,
-    mapColumn(ch) {
-      if (ch <= removedStart) return ch;
-      if (ch <= removedEnd) return removedStart;
-      return ch - removedLength;
-    },
-  };
-}
-
 function createPrefixedTask(indent, content, statusChar) {
   const prefix = `- [${statusChar}] `;
   const updatedLine = `${indent}${prefix}${content}`;
@@ -132,12 +115,22 @@ function applyStatusToLine(line, statusChar) {
 function transformToggledLine(line, statusChar) {
   const taskItemMatch = line.match(TASK_ITEM_RE);
   if (taskItemMatch && taskItemMatch[2] === statusChar) {
-    return createMarkerCleared(taskItemMatch[1], taskItemMatch[2], taskItemMatch[3]);
+    return createMarkerReplacement(
+      taskItemMatch[1],
+      taskItemMatch[2],
+      taskItemMatch[3],
+      " "
+    );
   }
 
   const bareTaskMatch = line.match(BARE_TASK_RE);
   if (bareTaskMatch && bareTaskMatch[2] === statusChar) {
-    return createMarkerCleared(bareTaskMatch[1], bareTaskMatch[2], bareTaskMatch[3]);
+    return createMarkerReplacement(
+      bareTaskMatch[1],
+      bareTaskMatch[2],
+      bareTaskMatch[3],
+      " "
+    );
   }
 
   return transformLine(line, statusChar);

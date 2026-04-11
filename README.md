@@ -54,7 +54,7 @@ npm run dev
 - Add `Set task status to in progress ([/])` for the active line or current multi-line selection
 - Add default hotkey `Mod+/`
 - Convert existing task items, list items, plain text, and blank lines into Things-compatible `[/]` task syntax
-- Press the same shortcut again on `[/]` items to clear the in-progress marker while keeping the current list shape
+- Press the same shortcut again on `[/]` items to turn them back into unchecked tasks `[ ]`
 
 ### workspace-switcher
 
