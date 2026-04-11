@@ -1,7 +1,13 @@
 let PluginClass = class {};
+let MarkdownViewClass = class {};
+let NoticeClass = class {};
 
 try {
-  ({ Plugin: PluginClass } = require("obsidian"));
+  ({
+    Plugin: PluginClass,
+    MarkdownView: MarkdownViewClass,
+    Notice: NoticeClass,
+  } = require("obsidian"));
 } catch (error) {
   // Allow local checks and tests outside Obsidian.
 }
@@ -198,6 +204,20 @@ function toggleTaskStatus(editor, statusChar) {
   updateEditorLines(editor, (line) => transformToggledLine(line, statusChar));
 }
 
+function getActiveMarkdownEditor(app) {
+  if (!app || !app.workspace || typeof app.workspace.getActiveViewOfType !== "function") {
+    return null;
+  }
+
+  const view = app.workspace.getActiveViewOfType(MarkdownViewClass);
+  if (!view) return null;
+  if (typeof view.getMode === "function" && view.getMode() !== "source") {
+    return null;
+  }
+
+  return view.editor || null;
+}
+
 class TaskStatusShortcutsPlugin extends PluginClass {
   async onload() {
     this.addCommand({
@@ -209,7 +229,13 @@ class TaskStatusShortcutsPlugin extends PluginClass {
           key: "/",
         },
       ],
-      editorCallback: (editor) => {
+      callback: () => {
+        const editor = getActiveMarkdownEditor(this.app);
+        if (!editor) {
+          new NoticeClass("Open a Markdown note in editing mode to use this command.");
+          return;
+        }
+
         toggleTaskStatus(editor, "/");
       },
     });
@@ -222,3 +248,4 @@ module.exports.applyStatusToLine = applyStatusToLine;
 module.exports.setTaskStatus = setTaskStatus;
 module.exports.toggleStatusOnLine = toggleStatusOnLine;
 module.exports.toggleTaskStatus = toggleTaskStatus;
+module.exports.getActiveMarkdownEditor = getActiveMarkdownEditor;
