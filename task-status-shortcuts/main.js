@@ -445,6 +445,15 @@ function createPrefixedTask(indent, content, statusChar) {
   };
 }
 
+function createIndentedBlankLine(indent) {
+  return {
+    line: indent,
+    mapColumn(ch) {
+      return Math.min(ch, indent.length);
+    },
+  };
+}
+
 function transformLine(line, statusChar) {
   const taskItemMatch = line.match(TASK_ITEM_RE);
   if (taskItemMatch) {
@@ -487,7 +496,24 @@ function applyStatusToLine(line, statusChar) {
 }
 
 function transformToggledLine(line, statusChar) {
+  const blankLineMatch = line.match(BLANK_LINE_RE);
+  if (blankLineMatch) {
+    const blankStatus = statusChar.toLowerCase() === "x" ? " " : statusChar;
+    return createBlankTask(blankLineMatch[1], blankStatus);
+  }
+
   const taskItemMatch = line.match(TASK_ITEM_RE);
+  if (
+    taskItemMatch &&
+    statusChar.toLowerCase() === "x" &&
+    taskItemMatch[2] === " " &&
+    taskItemMatch[3].trim() === ""
+  ) {
+    const indentMatch = taskItemMatch[1].match(/^(\s*)/);
+    const indent = indentMatch ? indentMatch[1] : "";
+    return createIndentedBlankLine(indent);
+  }
+
   if (taskItemMatch && taskItemMatch[2] === statusChar) {
     return createMarkerReplacement(
       taskItemMatch[1],

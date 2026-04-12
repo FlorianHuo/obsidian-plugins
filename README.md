@@ -49,6 +49,10 @@ npm run dev
 
 ### task-status-shortcuts
 
+#### Unreleased
+
+- `Mod+L` now inserts a new unchecked task on blank lines, and on an empty unchecked task line it clears the line back to blank
+
 #### v0.1.0 (2026-04-10)
 
 - Add `Set task status to in progress ([/])` for the active line or current multi-line selection

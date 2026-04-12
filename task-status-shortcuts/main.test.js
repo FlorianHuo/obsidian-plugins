@@ -147,6 +147,36 @@ test("toggleTaskStatus turns a done marker back into an unchecked task", () => {
   });
 });
 
+test("toggleTaskStatus inserts an unchecked task on blank lines for the done shortcut", () => {
+  const editor = createMockEditor([""], {
+    from: { line: 0, ch: 0 },
+    to: { line: 0, ch: 0 },
+  });
+
+  toggleTaskStatus(editor, "x");
+
+  assert.deepEqual(editor.lines, ["- [ ] "]);
+  assert.deepEqual(editor.selection, {
+    from: { line: 0, ch: 6 },
+    to: { line: 0, ch: 6 },
+  });
+});
+
+test("toggleTaskStatus clears an empty checkbox line for the done shortcut", () => {
+  const editor = createMockEditor(["- [ ] "], {
+    from: { line: 0, ch: 6 },
+    to: { line: 0, ch: 6 },
+  });
+
+  toggleTaskStatus(editor, "x");
+
+  assert.deepEqual(editor.lines, [""]);
+  assert.deepEqual(editor.selection, {
+    from: { line: 0, ch: 0 },
+    to: { line: 0, ch: 0 },
+  });
+});
+
 test("toggleTaskStatus applies line-by-line across a selection without touching the trailing line at ch 0", () => {
   const editor = createMockEditor(
     ["- [/] task", "plain text", "leave alone"],
