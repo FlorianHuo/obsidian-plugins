@@ -52,6 +52,8 @@ npm run dev
 #### Unreleased
 
 - `Mod+L` now inserts a new unchecked task on blank lines, and on an empty unchecked task line it clears the line back to blank
+- `Mod+/` now places a newly in-progress task below existing `[/]` siblings and above unchecked `[ ]` siblings instead of forcing it to the very top
+- `Mod+L` keeps existing `[x]` siblings ahead of the newly completed task, so new done items append to the current completed group
 
 #### v0.1.0 (2026-04-10)
 

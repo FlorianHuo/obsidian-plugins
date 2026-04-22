@@ -41,6 +41,10 @@ function createInlineTaskSortHelpers() {
     return typeof marker === "string" && marker.toLowerCase() === "x";
   }
 
+  function isInProgressTaskMarker(marker) {
+    return marker === "/";
+  }
+
   function isTaskLine(line) {
     return TASK_LINE_RE.test(line);
   }
@@ -77,7 +81,8 @@ function createInlineTaskSortHelpers() {
 
       const taskMatch = matchTaskLine(line);
       if (taskMatch && taskMatch[1] === baseIndent) {
-        const isCompleted = isCompletedTaskMarker(taskMatch[2]);
+        const marker = taskMatch[2];
+        const isCompleted = isCompletedTaskMarker(marker);
         const taskLines = [line];
         i++;
 
@@ -92,7 +97,13 @@ function createInlineTaskSortHelpers() {
           }
         }
 
-        tokens.push({ type: "task", isCompleted, lines: taskLines });
+        tokens.push({
+          type: "task",
+          marker,
+          isCompleted,
+          isInProgress: isInProgressTaskMarker(marker),
+          lines: taskLines,
+        });
         continue;
       }
 
@@ -122,11 +133,20 @@ function createInlineTaskSortHelpers() {
 
   function buildSortedTaskList(tokens, preferredFrontTasks, preferredBackTasks) {
     const tasks = tokens.filter((token) => token.type === "task");
+    const currentInProgress = tasks.filter(
+      (task) =>
+        task.isInProgress &&
+        !task.isCompleted &&
+        !preferredFrontTasks.has(task)
+    );
     const preferredIncomplete = tasks.filter(
       (task) => preferredFrontTasks.has(task) && !task.isCompleted
     );
     const remainingIncomplete = tasks.filter(
-      (task) => !task.isCompleted && !preferredFrontTasks.has(task)
+      (task) =>
+        !task.isCompleted &&
+        !task.isInProgress &&
+        !preferredFrontTasks.has(task)
     );
     const remainingComplete = tasks.filter(
       (task) => task.isCompleted && !preferredBackTasks.has(task)
@@ -136,6 +156,7 @@ function createInlineTaskSortHelpers() {
     );
 
     return [
+      ...currentInProgress,
       ...preferredIncomplete,
       ...remainingIncomplete,
       ...remainingComplete,

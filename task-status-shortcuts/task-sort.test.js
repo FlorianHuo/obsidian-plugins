@@ -50,3 +50,35 @@ test("sortTaskRegionLines can prioritize the current in-progress task to the bra
     "- [x] done",
   ]);
 });
+
+test("sortTaskRegionLines keeps a newly in-progress task below existing in-progress siblings", () => {
+  const regionLines = [
+    "- [/] started",
+    "- [ ] later",
+    "- [/] now",
+    "- [x] done",
+  ];
+  const { newLines } = sortTaskRegionLines(regionLines, "", [2]);
+
+  assert.deepEqual(newLines, [
+    "- [/] started",
+    "- [/] now",
+    "- [ ] later",
+    "- [x] done",
+  ]);
+});
+
+test("sortTaskRegionLines keeps a newly completed task below existing completed siblings", () => {
+  const regionLines = [
+    "- [ ] later",
+    "- [x] done",
+    "- [x] now",
+  ];
+  const { newLines } = sortTaskRegionLines(regionLines, "", [], [2]);
+
+  assert.deepEqual(newLines, [
+    "- [ ] later",
+    "- [x] done",
+    "- [x] now",
+  ]);
+});

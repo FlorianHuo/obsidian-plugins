@@ -13,6 +13,10 @@ function isCompletedTaskMarker(marker) {
   return typeof marker === "string" && marker.toLowerCase() === "x";
 }
 
+function isInProgressTaskMarker(marker) {
+  return marker === "/";
+}
+
 function isTaskLine(line) {
   return TASK_LINE_RE.test(line);
 }
@@ -49,7 +53,8 @@ function parseTokens(lines, startIndex, baseIndent) {
 
     const taskMatch = matchTaskLine(line);
     if (taskMatch && taskMatch[1] === baseIndent) {
-      const isCompleted = isCompletedTaskMarker(taskMatch[2]);
+      const marker = taskMatch[2];
+      const isCompleted = isCompletedTaskMarker(marker);
       const taskLines = [line];
       i++;
 
@@ -64,7 +69,13 @@ function parseTokens(lines, startIndex, baseIndent) {
         }
       }
 
-      tokens.push({ type: "task", isCompleted, lines: taskLines });
+      tokens.push({
+        type: "task",
+        marker,
+        isCompleted,
+        isInProgress: isInProgressTaskMarker(marker),
+        lines: taskLines,
+      });
       continue;
     }
 
@@ -92,11 +103,20 @@ function findTokenAtLine(tokens, lineOffset) {
 
 function buildSortedTaskList(tokens, preferredFrontTasks, preferredBackTasks) {
   const tasks = tokens.filter((token) => token.type === "task");
+  const currentInProgress = tasks.filter(
+    (task) =>
+      task.isInProgress &&
+      !task.isCompleted &&
+      !preferredFrontTasks.has(task)
+  );
   const preferredIncomplete = tasks.filter(
     (task) => preferredFrontTasks.has(task) && !task.isCompleted
   );
   const remainingIncomplete = tasks.filter(
-    (task) => !task.isCompleted && !preferredFrontTasks.has(task)
+    (task) =>
+      !task.isCompleted &&
+      !task.isInProgress &&
+      !preferredFrontTasks.has(task)
   );
   const remainingComplete = tasks.filter(
     (task) => task.isCompleted && !preferredBackTasks.has(task)
@@ -106,6 +126,7 @@ function buildSortedTaskList(tokens, preferredFrontTasks, preferredBackTasks) {
   );
 
   return [
+    ...currentInProgress,
     ...preferredIncomplete,
     ...remainingIncomplete,
     ...remainingComplete,
@@ -369,6 +390,7 @@ function isTaskCompletionChange(oldLine, newLine) {
 module.exports = {
   getIndent,
   isCompletedTaskMarker,
+  isInProgressTaskMarker,
   isTaskCompletionChange,
   isTaskLine,
   findSortableTaskRegionInLines,
