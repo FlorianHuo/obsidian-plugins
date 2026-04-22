@@ -73,6 +73,7 @@ npm run dev
 - Daily note paths and daily resets now use `Asia/Shanghai` instead of the computer's local timezone
 - While Obsidian stays open, the plugin checks for a new Beijing day every minute and refreshes the daily workspace state automatically
 - Editor task sorting moved out to `task-status-shortcuts`, so this plugin only owns workspace and daily-layout behavior
+- Single-tab panes now hide the tab strip without breaking drag-to-split, and the hidden header no longer leaks controls into the view header
 
 #### v1.1.0 (2026-03-27)
 

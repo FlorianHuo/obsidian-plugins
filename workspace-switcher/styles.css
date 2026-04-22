@@ -1,5 +1,28 @@
-/* Hide tab header bar when a pane contains only one tab.
-   The bar reappears automatically if multiple tabs are opened. */
+/* Keep the single-tab header box in layout for split-drop calculations,
+   but hide its contents and only raise the hit area while dragging. */
 .workspace-tab-header-container:has(.workspace-tab-header:only-child) {
-  display: none !important;
+  display: flex !important;
+  height: var(--header-height) !important;
+  flex: 0 0 var(--header-height) !important;
+  margin-bottom: calc(-1 * var(--header-height)) !important;
+  border-bottom: 0 !important;
+  background: transparent !important;
+  position: relative !important;
+}
+
+.workspace-tab-header-container:has(.workspace-tab-header:only-child) > * {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+body.is-grabbing .workspace-tab-header-container:has(.workspace-tab-header:only-child) {
+  z-index: var(--layer-cover) !important;
+  pointer-events: auto !important;
+}
+
+body.is-grabbing
+  .workspace-tab-header-container:has(.workspace-tab-header:only-child)
+  + .workspace-tab-container {
+  position: relative !important;
+  z-index: 0 !important;
 }
