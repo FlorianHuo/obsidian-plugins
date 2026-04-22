@@ -1,9 +1,0 @@
-{
-  "id": "task-status-shortcuts",
-  "name": "Task Status Shortcuts",
-  "version": "0.1.0",
-  "minAppVersion": "1.5.0",
-  "description": "Adds task status shortcuts and editor task sorting for Things-style workflows.",
-  "author": "Florian",
-  "isDesktopOnly": false
-}

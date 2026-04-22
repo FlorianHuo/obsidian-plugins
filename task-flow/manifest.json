@@ -1,0 +1,9 @@
+{
+  "id": "task-flow",
+  "name": "Task Flow",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Adds task status shortcuts and status-based task sorting for Things-style workflows.",
+  "author": "Florian",
+  "isDesktopOnly": false
+}

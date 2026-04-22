@@ -42,12 +42,12 @@ npm run dev
 
 | Plugin | Description | Status |
 |--------|-------------|--------|
-| [task-status-shortcuts](./task-status-shortcuts/) | Add task status shortcuts plus editor task sorting for Things-style workflows | v0.1.0 |
+| [task-flow](./task-flow/) | Add task status shortcuts plus editor task sorting for Things-style workflows | v0.1.0 |
 | [workspace-switcher](./workspace-switcher/) | Manage workspaces: built-in TODO/Focus layouts, save/load/delete custom workspaces, auto-update daily notes in Beijing time | v1.1.0 |
 
 ## Changelog
 
-### task-status-shortcuts
+### task-flow
 
 #### Unreleased
 
@@ -72,7 +72,7 @@ npm run dev
 
 - Daily note paths and daily resets now use `Asia/Shanghai` instead of the computer's local timezone
 - While Obsidian stays open, the plugin checks for a new Beijing day every minute and refreshes the daily workspace state automatically
-- Editor task sorting moved out to `task-status-shortcuts`, so this plugin only owns workspace and daily-layout behavior
+- Editor task sorting moved out to `task-flow`, so this plugin only owns workspace and daily-layout behavior
 - Single-tab panes now hide the tab strip without breaking drag-to-split, and the hidden header no longer leaks controls into the view header
 
 #### v1.1.0 (2026-03-27)

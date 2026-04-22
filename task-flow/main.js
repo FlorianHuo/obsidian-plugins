@@ -388,10 +388,7 @@ function loadTaskSortHelpers() {
   try {
     return require("./task-sort");
   } catch (error) {
-    console.error(
-      "task-status-shortcuts: failed to load task-sort.js, using inline fallback",
-      error
-    );
+    console.error("task-flow: failed to load task-sort.js, using inline fallback", error);
     return createInlineTaskSortHelpers();
   }
 }
