@@ -8,112 +8,6 @@
 
 const obsidian = require("obsidian");
 
-const TASK_LINE_RE = /^(\s*)-\s*\[([^\]])\]/;
-
-function getIndent(line) {
-  const match = line.match(/^(\s*)/);
-  return match ? match[1] : "";
-}
-
-function parseTaskTokens(lines, startIndex, baseIndent) {
-  const tokens = [];
-  let i = startIndex;
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    if (line.trim() === "") {
-      let j = i + 1;
-      while (j < lines.length && lines[j].trim() === "") j++;
-      if (j < lines.length) {
-        const nextTaskMatch = lines[j].match(TASK_LINE_RE);
-        const nextIndent = getIndent(lines[j]);
-        if (
-          (nextTaskMatch && nextTaskMatch[1] === baseIndent) ||
-          nextIndent.length > baseIndent.length
-        ) {
-          tokens.push({ type: "blank", lines: lines.slice(i, j) });
-          i = j;
-          continue;
-        }
-      }
-      break;
-    }
-
-    const taskMatch = line.match(TASK_LINE_RE);
-    if (taskMatch && taskMatch[1] === baseIndent) {
-      const taskLines = [line];
-      const isCompleted = taskMatch[2].toLowerCase() === "x";
-      i += 1;
-
-      while (i < lines.length) {
-        if (lines[i].trim() === "") break;
-        const indent = getIndent(lines[i]);
-        if (indent.length > baseIndent.length) {
-          taskLines.push(lines[i]);
-          i += 1;
-        } else {
-          break;
-        }
-      }
-
-      tokens.push({ type: "task", isCompleted, lines: taskLines });
-      continue;
-    }
-
-    break;
-  }
-
-  return { tokens, nextIndex: i };
-}
-
-function removeCompletedContent(content) {
-  const lines = content.split("\n");
-  const newLines = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    if (TASK_LINE_RE.test(lines[i])) {
-      const match = lines[i].match(/^(\s*)-\s*\[/);
-      const baseIndent = match[1];
-      const { tokens, nextIndex } = parseTaskTokens(lines, i, baseIndent);
-      i = nextIndex;
-
-      let prevWasDroppedTask = false;
-      for (const token of tokens) {
-        if (token.type === "task") {
-          if (!token.isCompleted) {
-            prevWasDroppedTask = false;
-            if (token.lines.length > 1) {
-              const head = token.lines[0];
-              const tail = token.lines.slice(1).join("\n");
-              const processedTail = removeCompletedContent(tail);
-              newLines.push(head);
-              if (processedTail !== "") {
-                newLines.push(...processedTail.split("\n"));
-              }
-            } else {
-              newLines.push(...token.lines);
-            }
-          } else {
-            prevWasDroppedTask = true;
-          }
-        } else {
-          if (!prevWasDroppedTask) {
-            newLines.push(...token.lines);
-          }
-          prevWasDroppedTask = false;
-        }
-      }
-    } else {
-      newLines.push(lines[i]);
-      i += 1;
-    }
-  }
-
-  return newLines.join("\n");
-}
-
 const DAILY_TIME_ZONE = "Asia/Shanghai";
 const DAILY_ROLLOVER_CHECK_INTERVAL_MS = 60 * 1000;
 
@@ -244,13 +138,13 @@ class WorkspaceQuickSwitchModal extends obsidian.Modal {
 
 class WorkspaceSwitcherPlugin extends obsidian.Plugin {
   async onload() {
-    // Load persisted data (tracks last reset date + saved workspaces)
+    // Load persisted data for saved workspaces and rollover tracking.
     this.data = (await this.loadData()) || {};
     if (!this.data.workspaces) this.data.workspaces = {};
     this.lastSeenDate = this.getTodayDateStr();
     this.isDateRefreshInFlight = false;
 
-    // On startup: update stale journal paths and reset daily track
+    // On startup: update stale journal paths only.
     this.app.workspace.onLayoutReady(() => void this.onStartup());
     this.registerInterval(window.setInterval(() => {
       void this.checkForDayRollover();
@@ -320,9 +214,8 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
       check(layout[key]);
     }
 
-    // Ensure today's journal exists and reset daily track
+    // Ensure today's journal exists
     await this.ensureFile(todayPath);
-    await this.resetDailyTrackIfNeeded();
 
     if (changed) {
       await this.app.workspace.changeLayout(layout);
@@ -377,45 +270,6 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     const currentLayout = this.app.workspace.getLayout();
     currentLayout.main = newMain;
     await this.app.workspace.changeLayout(currentLayout);
-  }
-
-  // Reset tracks/daily.md to the template if a new day has started.
-  async resetDailyTrackIfNeeded() {
-    const today = this.getTodayDateStr();
-    if (this.data.lastDailyReset === today) return;
-
-    const templateFile =
-      this.app.vault.getAbstractFileByPath("templates/daily.md");
-    if (!templateFile) return;
-
-    const dailyTrack =
-      this.app.vault.getAbstractFileByPath("tracks/daily.md");
-
-    // Keep uncompleted tasks in current.md and remove completed ones
-    const currentFile =
-      this.app.vault.getAbstractFileByPath("tracks/current.md");
-    if (currentFile) {
-      const currentContent = await this.app.vault.read(currentFile);
-      if (currentContent.trim().length > 0) {
-        const filteredContent = this.removeCompleted(currentContent);
-        await this.app.vault.modify(currentFile, filteredContent);
-      }
-    }
-
-    // Reset daily track to template
-    const templateContent = await this.app.vault.read(templateFile);
-    if (dailyTrack) {
-      await this.app.vault.modify(dailyTrack, templateContent);
-    } else {
-      await this.app.vault.create("tracks/daily.md", templateContent);
-    }
-
-    this.data.lastDailyReset = today;
-    await this.saveData(this.data);
-  }
-
-  removeCompleted(content) {
-    return removeCompletedContent(content);
   }
 
   // ---- Saved workspace management ----
@@ -475,9 +329,6 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
 
     // Ensure today's daily note file exists
     await this.ensureFile(todayPath);
-
-    // Reset daily track if a new day has started
-    await this.resetDailyTrackIfNeeded();
 
     await this.app.workspace.changeLayout(layout);
     new obsidian.Notice(`Workspace "${name}" loaded.`);

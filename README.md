@@ -77,9 +77,9 @@ npm run dev
 
 #### Unreleased
 
-- Daily note paths and daily resets now use `Asia/Shanghai` instead of the computer's local timezone
-- While Obsidian stays open, the plugin checks for a new Beijing day every minute and refreshes the daily workspace state automatically
-- Editor task sorting moved out to `task-flow`, so this plugin only owns workspace and daily-layout behavior
+- Daily journal path updates use `Asia/Shanghai` instead of the computer's local timezone
+- While Obsidian stays open, the plugin checks for a new Beijing day every minute and refreshes stale daily workspace journal paths automatically
+- Remove the legacy daily content reset code; `workspace-switcher` now only owns workspace and journal-layout behavior
 - Single-tab panes now hide the tab strip without breaking drag-to-split, and the hidden header no longer leaks controls into the view header
 
 #### v1.1.0 (2026-03-27)
@@ -87,9 +87,7 @@ npm run dev
 - **Save/Load/Delete custom workspaces** with fuzzy-search picker and full layout persistence (including sidebars)
 - **Auto-update daily notes on startup**: detects stale `journal/YYYY-MM-DD.md` paths and replaces with today's date
 - **Auto-update daily notes on workspace load**: same detection when loading a saved workspace
-- **Daily track auto-reset**: `tracks/daily.md` is archived and reset from template on new day
 - **Hide single-tab headers**: CSS removes tab bar when a pane has only one tab
-- Fix: daily track template reference (was pointing to non-existent file)
 - Fix: journal path in `ensureFile()` no longer uses TODO template for daily notes
 
 #### v1.0.0
