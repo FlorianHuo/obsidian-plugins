@@ -26,3 +26,21 @@ body.is-grabbing
   position: relative !important;
   z-index: 0 !important;
 }
+
+.workspace-switcher-quick-switch-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.workspace-switcher-quick-switch-item {
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.workspace-switcher-quick-switch-item.is-selected {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}

@@ -1,10 +1,6 @@
 // Workspace Switcher Plugin for Obsidian
 //
-// Built-in workspaces:
-//   - "TODO workspace"  - 3 tracks (urgent/important/trivial) on top + daily note on bottom
-//   - "Focus workspace" - single panel with the currently active file
-//
-// User-defined workspaces:
+// Saved workspaces:
 //   - Save / Load / Delete custom layouts via commands
 //
 // Key design: uses workspace.getLayout() to preserve sidebars,
@@ -143,6 +139,109 @@ class WorkspacePickerModal extends obsidian.FuzzySuggestModal {
   }
 }
 
+class WorkspaceQuickSwitchModal extends obsidian.Modal {
+  constructor(app, workspaceNames, onChoose) {
+    super(app);
+    this.names = workspaceNames;
+    this.onChoose = onChoose;
+    this.query = "";
+    this.selected = 0;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+
+    contentEl.createEl("h3", { text: "Switch workspace" });
+
+    this.inputEl = contentEl.createEl("input", {
+      type: "text",
+      placeholder: "Type to filter workspaces...",
+    });
+    this.inputEl.style.width = "100%";
+    this.inputEl.focus();
+
+    this.listEl = contentEl.createDiv();
+    this.listEl.addClass("workspace-switcher-quick-switch-list");
+
+    this.inputEl.addEventListener("input", () => {
+      this.query = this.inputEl.value.trim().toLowerCase();
+      this.selected = 0;
+      this.renderList();
+    });
+
+    this.inputEl.addEventListener("keydown", (evt) => {
+      if (evt.key === "ArrowUp" || evt.key === "k") {
+        evt.preventDefault();
+        this.move(-1);
+      } else if (evt.key === "ArrowDown" || evt.key === "j") {
+        evt.preventDefault();
+        this.move(1);
+      } else if (evt.key === "Enter") {
+        evt.preventDefault();
+        this.chooseSelected();
+      }
+    });
+
+    this.renderList();
+  }
+
+  getFilteredNames() {
+    if (!this.query) return this.names;
+    return this.names.filter((name) =>
+      name.toLowerCase().includes(this.query)
+    );
+  }
+
+  move(step) {
+    const names = this.getFilteredNames();
+    if (names.length === 0) return;
+
+    this.selected = (this.selected + step + names.length) % names.length;
+    this.renderList();
+  }
+
+  chooseSelected() {
+    const names = this.getFilteredNames();
+    if (names.length === 0) return;
+
+    const name = names[this.selected];
+    this.close();
+    this.onChoose(name);
+  }
+
+  renderList() {
+    const names = this.getFilteredNames();
+    this.listEl.empty();
+
+    if (names.length === 0) {
+      this.listEl.createEl("p", { text: "No matching workspaces." });
+      return;
+    }
+
+    if (this.selected >= names.length) {
+      this.selected = names.length - 1;
+    }
+
+    names.forEach((name, index) => {
+      const itemEl = this.listEl.createDiv();
+      itemEl.setText(name);
+      itemEl.addClass("workspace-switcher-quick-switch-item");
+      if (index === this.selected) {
+        itemEl.addClass("is-selected");
+      }
+      itemEl.addEventListener("click", () => {
+        this.selected = index;
+        this.chooseSelected();
+      });
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
 class WorkspaceSwitcherPlugin extends obsidian.Plugin {
   async onload() {
     // Load persisted data (tracks last reset date + saved workspaces)
@@ -161,15 +260,15 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     });
 
     this.addCommand({
-      id: "todo-workspace",
-      name: "Switch to TODO workspace",
-      callback: () => this.switchToTodoWorkspace(),
-    });
-
-    this.addCommand({
-      id: "focus-workspace",
-      name: "Switch to Focus workspace",
-      callback: () => this.switchToFocusWorkspace(),
+      id: "quick-switch-workspace",
+      name: "Quick switch workspace",
+      hotkeys: [
+        {
+          modifiers: ["Alt"],
+          key: "W",
+        },
+      ],
+      callback: () => this.openWorkspaceQuickSwitch(),
     });
 
     this.addCommand({
@@ -319,150 +418,21 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     return removeCompletedContent(content);
   }
 
-  async switchToTodoWorkspace() {
-    const trackFiles = [
-      "tracks/urgent.md",
-      "tracks/important.md",
-      "tracks/trivial.md",
-    ];
-    const dailyNotePath = `journal/${this.getTodayDateStr()}.md`;
+  // ---- Saved workspace management ----
 
-    // Ensure all files exist
-    for (const p of trackFiles) {
-      await this.ensureFile(p);
+  async openWorkspaceQuickSwitch() {
+    const names = Object.keys(this.data.workspaces).sort((a, b) =>
+      a.localeCompare(b)
+    );
+    if (names.length === 0) {
+      new obsidian.Notice("No saved workspaces.");
+      return;
     }
-    await this.ensureFile(dailyNotePath);
 
-    // Reset daily track if a new day has started
-    await this.resetDailyTrackIfNeeded();
-
-    // Layout structure:
-    //   main split (direction: vertical)
-    //     inner split (direction: horizontal) -- top/bottom rows
-    //       top row: split (direction: vertical) -- 3 columns
-    //         urgent | important | trivial
-    //       bottom row: split (direction: vertical) -- 2 columns
-    //         daily note (left) | tracks/daily.md (right)
-
-    const newMain = {
-      type: "split",
-      children: [
-        {
-          type: "split",
-          children: [
-            {
-              type: "split",
-              children: trackFiles.map((f) => ({
-                type: "tabs",
-                children: [
-                  {
-                    type: "leaf",
-                    state: {
-                      type: "markdown",
-                      state: { file: f, mode: "source", source: false },
-                    },
-                  },
-                ],
-              })),
-              direction: "vertical",
-            },
-            {
-              type: "split",
-              children: [
-                {
-                  type: "tabs",
-                  children: [
-                    {
-                      type: "leaf",
-                      state: {
-                        type: "markdown",
-                        state: {
-                          file: "tracks/current.md",
-                          mode: "source",
-                          source: false,
-                        },
-                      },
-                    },
-                  ],
-                },
-                {
-                  type: "tabs",
-                  children: [
-                    {
-                      type: "leaf",
-                      state: {
-                        type: "markdown",
-                        state: {
-                          file: dailyNotePath,
-                          mode: "source",
-                          source: false,
-                        },
-                      },
-                    },
-                  ],
-                },
-                {
-                  type: "tabs",
-                  children: [
-                    {
-                      type: "leaf",
-                      state: {
-                        type: "markdown",
-                        state: {
-                          file: "tracks/daily.md",
-                          mode: "source",
-                          source: false,
-                        },
-                      },
-                    },
-                  ],
-                },
-              ],
-              direction: "vertical",
-            },
-          ],
-          direction: "horizontal",
-        },
-      ],
-      direction: "vertical",
-    };
-
-    await this.applyMainLayout(newMain);
+    new WorkspaceQuickSwitchModal(this.app, names, async (name) => {
+      await this.loadSavedWorkspaceByName(name);
+    }).open();
   }
-
-  async switchToFocusWorkspace() {
-    // Remember the currently active file
-    const activeFile = this.app.workspace.getActiveFile();
-    const filePath = activeFile ? activeFile.path : null;
-
-    // Single-pane layout
-    const leafState = filePath
-      ? {
-          type: "markdown",
-          state: { file: filePath, mode: "source", source: false },
-        }
-      : { type: "empty", state: {} };
-
-    const newMain = {
-      type: "split",
-      children: [
-        {
-          type: "tabs",
-          children: [
-            {
-              type: "leaf",
-              state: leafState,
-            },
-          ],
-        },
-      ],
-      direction: "vertical",
-    };
-
-    await this.applyMainLayout(newMain);
-  }
-
-  // ---- Custom workspace management ----
 
   async saveCurrentWorkspace() {
     const name = await this.promptForName("Save workspace as:");
@@ -483,27 +453,34 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     }
 
     new WorkspacePickerModal(this.app, names, async (name) => {
-      const savedLayout = this.data.workspaces[name];
-      if (savedLayout) {
-        // Deep clone to avoid mutating saved data
-        const layout = JSON.parse(JSON.stringify(savedLayout));
-
-        // Update any journal/YYYY-MM-DD.md paths to today's date
-        const todayPath = `journal/${this.getTodayDateStr()}.md`;
-        for (const key of Object.keys(layout)) {
-          this.updateJournalPaths(layout[key], todayPath);
-        }
-
-        // Ensure today's daily note file exists
-        await this.ensureFile(todayPath);
-
-        // Reset daily track if a new day has started
-        await this.resetDailyTrackIfNeeded();
-
-        await this.app.workspace.changeLayout(layout);
-        new obsidian.Notice(`Workspace "${name}" loaded.`);
-      }
+      await this.loadSavedWorkspaceByName(name);
     }).open();
+  }
+
+  async loadSavedWorkspaceByName(name) {
+    const savedLayout = this.data.workspaces[name];
+    if (!savedLayout) {
+      new obsidian.Notice(`Workspace "${name}" not found.`);
+      return;
+    }
+
+    // Deep clone to avoid mutating saved data
+    const layout = JSON.parse(JSON.stringify(savedLayout));
+
+    // Update any journal/YYYY-MM-DD.md paths to today's date
+    const todayPath = `journal/${this.getTodayDateStr()}.md`;
+    for (const key of Object.keys(layout)) {
+      this.updateJournalPaths(layout[key], todayPath);
+    }
+
+    // Ensure today's daily note file exists
+    await this.ensureFile(todayPath);
+
+    // Reset daily track if a new day has started
+    await this.resetDailyTrackIfNeeded();
+
+    await this.app.workspace.changeLayout(layout);
+    new obsidian.Notice(`Workspace "${name}" loaded.`);
   }
 
   // Recursively walk a layout tree and replace journal date paths with today's
