@@ -400,6 +400,7 @@ const {
   mapPositionThroughSortedRegion,
   matchTaskLine,
   parseTokens,
+  removeCompletedContent,
   sortTaskContent,
   sortTaskRegionLines,
 } = loadTaskSortHelpers();
@@ -408,6 +409,214 @@ const TASK_ITEM_RE = /^(\s*(?:[-*+]|\d+\.)\s+)\[([^\]]?)\](.*)$/;
 const BARE_TASK_RE = /^(\s*)\[([^\]]?)\](.*)$/;
 const LIST_ITEM_RE = /^(\s*(?:[-*+]|\d+\.)\s+)(.*)$/;
 const BLANK_LINE_RE = /^(\s*)$/;
+const CURRENT_TRACKS_FILE_PATH = "tracks/current.md";
+const TRACKS_FILE_PATH = "tracks/tracks.md";
+const DAILY_TIME_ZONE = "Asia/Shanghai";
+const DAILY_REFRESH_ICON = "refresh-cw";
+const DAILY_HEADER_ACTION_CLASS = "task-flow-refresh-current-daily";
+
+function preserveTrailingNewlines(sourceText, updatedText) {
+  const sourceTrailingNewlineCount = sourceText.match(/\n*$/)?.[0].length ?? 0;
+  const updatedTrailingNewlineCount = updatedText.match(/\n*$/)?.[0].length ?? 0;
+
+  if (updatedTrailingNewlineCount >= sourceTrailingNewlineCount) {
+    return updatedText;
+  }
+
+  return `${updatedText}${"\n".repeat(sourceTrailingNewlineCount - updatedTrailingNewlineCount)}`;
+}
+
+function getTodayDateStr(timeZone = DAILY_TIME_ZONE, now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+
+  const dateParts = {};
+  for (const part of parts) {
+    if (part.type !== "literal") {
+      dateParts[part.type] = part.value;
+    }
+  }
+
+  return `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+}
+
+function shouldRefreshCurrentDailySection(lastRefreshDate, today = getTodayDateStr()) {
+  return lastRefreshDate !== today;
+}
+
+function normalizeDailyRhythmTask(line) {
+  const bulletMatch = line.match(/^\s*-\s+(.*)$/);
+  if (!bulletMatch) return null;
+
+  const rawText = bulletMatch[1].trim();
+  if (rawText === "") return null;
+
+  const checkboxMatch = rawText.match(/^\[[^\]]?\]\s*(.*)$/);
+  const taskText = checkboxMatch ? checkboxMatch[1].trim() : rawText;
+  return taskText === "" ? null : taskText;
+}
+
+function extractRhythmsDailyTasks(tracksContent) {
+  const lines = tracksContent.split("\n");
+  let foundRhythms = false;
+  let foundDaily = false;
+  const tasks = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (!foundRhythms) {
+      if (trimmed === "## Rhythms") {
+        foundRhythms = true;
+      }
+      continue;
+    }
+
+    if (!foundDaily) {
+      if (/^##\s+/.test(trimmed) && trimmed !== "## Rhythms") {
+        return null;
+      }
+      if (trimmed === "**Daily**") {
+        foundDaily = true;
+      }
+      continue;
+    }
+
+    if (trimmed === "") {
+      continue;
+    }
+
+    if (/^##\s+/.test(trimmed) || /^\*\*.+\*\*$/.test(trimmed)) {
+      break;
+    }
+
+    const indentMatch = line.match(/^(\s*)/);
+    const indent = indentMatch ? indentMatch[1] : "";
+    if (indent.length > 0) {
+      continue;
+    }
+
+    const taskText = normalizeDailyRhythmTask(line);
+    if (taskText === null) {
+      return null;
+    }
+
+    tasks.push(taskText);
+  }
+
+  if (!foundRhythms || !foundDaily) {
+    return null;
+  }
+
+  return tasks;
+}
+
+function renderCurrentDailySectionLines(tasks) {
+  const taskLines = tasks.map((task) => `- [ ] ${task}`);
+  if (taskLines.length === 0) {
+    return [""];
+  }
+
+  return ["", ...taskLines, ""];
+}
+
+function findCurrentSectionRange(lines, headingText, nextHeadingText = null) {
+  const headingIndex = lines.findIndex((line) => line.trim() === headingText);
+  if (headingIndex === -1) return null;
+
+  let nextHeadingIndex = lines.length;
+  if (nextHeadingText !== null) {
+    nextHeadingIndex = lines.findIndex(
+      (line, index) => index > headingIndex && line.trim() === nextHeadingText
+    );
+    if (nextHeadingIndex === -1) return null;
+  }
+
+  return {
+    headingIndex,
+    bodyStartIndex: headingIndex + 1,
+    nextHeadingIndex,
+  };
+}
+
+function getSectionBodyText(lines, sectionRange) {
+  return lines
+    .slice(sectionRange.bodyStartIndex, sectionRange.nextHeadingIndex)
+    .join("\n");
+}
+
+function replaceCurrentSectionBody(lines, sectionRange, newBodyText) {
+  const newBodyLines = newBodyText === "" ? [""] : newBodyText.split("\n");
+  return [
+    ...lines.slice(0, sectionRange.bodyStartIndex),
+    ...newBodyLines,
+    ...lines.slice(sectionRange.nextHeadingIndex),
+  ];
+}
+
+function replaceCurrentDailySectionLines(lines, dailyTasks) {
+  const dailySection = findCurrentSectionRange(lines, "**日常**", "**主线**");
+  if (!dailySection) return null;
+
+  return replaceCurrentSectionBody(
+    lines,
+    dailySection,
+    renderCurrentDailySectionLines(dailyTasks).join("\n")
+  );
+}
+
+function replaceCurrentDailySection(currentContent, dailyTasks) {
+  const lines = currentContent.split("\n");
+  const updatedLines = replaceCurrentDailySectionLines(lines, dailyTasks);
+  if (!updatedLines) return null;
+
+  return preserveTrailingNewlines(currentContent, updatedLines.join("\n"));
+}
+
+function cleanCarryoverSection(lines, headingText, nextHeadingText = null) {
+  const sectionRange = findCurrentSectionRange(lines, headingText, nextHeadingText);
+  if (!sectionRange) return null;
+
+  const cleanedBody = removeCompletedContent(getSectionBodyText(lines, sectionRange));
+  return replaceCurrentSectionBody(lines, sectionRange, cleanedBody);
+}
+
+function buildCurrentRefreshLines(currentContent, dailyTasks) {
+  const lines = currentContent.split("\n");
+  const withDailyReset = replaceCurrentDailySectionLines(lines, dailyTasks);
+  if (!withDailyReset) return null;
+
+  const withMainCleaned = cleanCarryoverSection(
+    withDailyReset,
+    "**主线**",
+    "**支线**"
+  );
+  if (!withMainCleaned) return null;
+
+  const withSideCleaned = cleanCarryoverSection(withMainCleaned, "**支线**");
+  if (!withSideCleaned) return null;
+
+  return withSideCleaned;
+}
+
+function buildRefreshedCurrentContent(currentContent, tracksContent) {
+  const dailyTasks = extractRhythmsDailyTasks(tracksContent);
+  if (dailyTasks === null) {
+    return null;
+  }
+
+  const refreshedLines = buildCurrentRefreshLines(currentContent, dailyTasks);
+  if (!refreshedLines) {
+    return null;
+  }
+
+  return preserveTrailingNewlines(currentContent, refreshedLines.join("\n"));
+}
+
 
 function createMarkerReplacement(prefix, oldMarker, suffix, statusChar) {
   const updatedLine = `${prefix}[${statusChar}]${suffix}`;
@@ -1085,6 +1294,60 @@ async function sortCurrentFile(app, silent = false) {
   return false;
 }
 
+async function refreshCurrentDailySection(
+  app,
+  pluginData = {},
+  saveData = async () => {}
+) {
+  const today = getTodayDateStr();
+  if (!shouldRefreshCurrentDailySection(pluginData.lastCurrentDailySyncDate, today)) {
+    new NoticeClass("Daily refresh is only available once per Beijing day.");
+    return false;
+  }
+
+  const tracksFile = app.vault.getAbstractFileByPath(TRACKS_FILE_PATH);
+  const currentFile = app.vault.getAbstractFileByPath(CURRENT_TRACKS_FILE_PATH);
+
+  if (!tracksFile || !currentFile) {
+    new NoticeClass("Missing tracks.md or current.md for daily refresh.");
+    return false;
+  }
+
+  const tracksContent = await app.vault.read(tracksFile);
+  const currentContent = await app.vault.read(currentFile);
+  const preview = buildRefreshedCurrentContent(currentContent, tracksContent);
+
+  if (preview === null) {
+    new NoticeClass("Daily refresh needs a valid Rhythms/Daily block and current.md sections.");
+    return false;
+  }
+
+  let replaced = false;
+  let failed = false;
+
+  await app.vault.process(currentFile, (data) => {
+    const updated = buildRefreshedCurrentContent(data, tracksContent);
+    if (updated === null) {
+      failed = true;
+      return data;
+    }
+
+    replaced = true;
+    return updated;
+  });
+
+  if (failed || !replaced) {
+    new NoticeClass("Daily refresh failed because current.md changed while updating.");
+    return false;
+  }
+
+  pluginData.lastCurrentDailySyncDate = today;
+  await saveData(pluginData);
+
+  new NoticeClass("current.md daily section refreshed.");
+  return true;
+}
+
 function runTaskStatusCommand(app, statusChar, isToggle) {
   const editor = ensureEditableMarkdownEditor(app);
   if (!editor) {
@@ -1095,12 +1358,117 @@ function runTaskStatusCommand(app, statusChar, isToggle) {
   applyTaskStatusCommandToEditor(editor, statusChar, isToggle);
 }
 
+function isCurrentTracksFile(file) {
+  return !!file && file.path === CURRENT_TRACKS_FILE_PATH;
+}
+
+function getMarkdownLeaves(app) {
+  if (!app?.workspace) {
+    return [];
+  }
+
+  const leaves = [];
+  const isMarkdownLeaf = (leaf) =>
+    !!leaf?.view &&
+    (leaf.view instanceof MarkdownViewClass || typeof leaf.view.addAction === "function");
+
+  if (typeof app.workspace.iterateAllLeaves === "function") {
+    app.workspace.iterateAllLeaves((leaf) => {
+      if (isMarkdownLeaf(leaf)) {
+        leaves.push(leaf);
+      }
+    });
+    return leaves;
+  }
+
+  if (typeof app.workspace.getLeavesOfType === "function") {
+    return app.workspace.getLeavesOfType("markdown").filter(isMarkdownLeaf);
+  }
+
+  return leaves;
+}
+
+function addDailyRefreshHeaderAction(plugin, leaf, pluginData) {
+  const view = leaf?.view;
+  if (!view || typeof view.addAction !== "function") {
+    return null;
+  }
+
+  const existingAction = plugin.currentDailyHeaderActions.get(leaf);
+  if (existingAction?.isConnected) {
+    return existingAction;
+  }
+
+  const action = view.addAction(
+    DAILY_REFRESH_ICON,
+    "Refresh current.md daily section",
+    () => void refreshCurrentDailySection(plugin.app, pluginData, (data) => plugin.saveData(data))
+  );
+  action?.classList?.add(DAILY_HEADER_ACTION_CLASS);
+  plugin.currentDailyHeaderActions.set(leaf, action);
+  return action;
+}
+
+function removeDailyRefreshHeaderAction(plugin, leaf) {
+  const existingAction = plugin.currentDailyHeaderActions.get(leaf);
+  if (existingAction?.remove) {
+    existingAction.remove();
+  }
+  plugin.currentDailyHeaderActions.delete(leaf);
+}
+
+function syncDailyRefreshHeaderActions(plugin, pluginData) {
+  const leaves = getMarkdownLeaves(plugin.app);
+  const activeLeaves = new Set(leaves);
+
+  for (const [leaf] of plugin.currentDailyHeaderActions) {
+    if (!activeLeaves.has(leaf) || !isCurrentTracksFile(leaf?.view?.file)) {
+      removeDailyRefreshHeaderAction(plugin, leaf);
+    }
+  }
+
+  for (const leaf of leaves) {
+    if (!isCurrentTracksFile(leaf?.view?.file)) {
+      continue;
+    }
+
+    addDailyRefreshHeaderAction(plugin, leaf, pluginData);
+  }
+}
+
+function registerDailyRefreshHeaderActions(plugin) {
+  if (!plugin?.app?.workspace?.onLayoutReady) {
+    return;
+  }
+
+  const sync = () => syncDailyRefreshHeaderActions(plugin, plugin.data);
+
+  plugin.app.workspace.onLayoutReady(() => {
+    sync();
+  });
+
+  plugin.registerEvent(plugin.app.workspace.on("file-open", sync));
+  plugin.registerEvent(plugin.app.workspace.on("active-leaf-change", sync));
+  plugin.registerEvent(plugin.app.workspace.on("layout-change", sync));
+
+  plugin.register(() => {
+    for (const [leaf] of plugin.currentDailyHeaderActions) {
+      removeDailyRefreshHeaderAction(plugin, leaf);
+    }
+  });
+}
+
 class TaskStatusShortcutsPlugin extends PluginClass {
   async onload() {
+    this.data = (await this.loadData()) || {};
+    this.currentDailyHeaderActions = new Map();
+
     const taskSortExtension = buildTaskSortExtension();
     if (taskSortExtension) {
       this.registerEditorExtension(taskSortExtension);
     }
+
+    registerDailyRefreshHeaderActions(this);
 
     this.addCommand({
       id: "set-task-status-in-progress",
@@ -1147,7 +1515,19 @@ module.exports.ensureEditableMarkdownEditor = ensureEditableMarkdownEditor;
 module.exports.getActiveMarkdownEditor = getActiveMarkdownEditor;
 module.exports.getActiveMarkdownView = getActiveMarkdownView;
 module.exports.runTaskStatusCommand = runTaskStatusCommand;
+module.exports.buildRefreshedCurrentContent = buildRefreshedCurrentContent;
+module.exports.extractRhythmsDailyTasks = extractRhythmsDailyTasks;
+module.exports.addDailyRefreshHeaderAction = addDailyRefreshHeaderAction;
+module.exports.getMarkdownLeaves = getMarkdownLeaves;
+module.exports.getTodayDateStr = getTodayDateStr;
+module.exports.isCurrentTracksFile = isCurrentTracksFile;
+module.exports.registerDailyRefreshHeaderActions = registerDailyRefreshHeaderActions;
+module.exports.removeDailyRefreshHeaderAction = removeDailyRefreshHeaderAction;
+module.exports.refreshCurrentDailySection = refreshCurrentDailySection;
+module.exports.replaceCurrentDailySection = replaceCurrentDailySection;
 module.exports.setTaskStatus = setTaskStatus;
+module.exports.shouldRefreshCurrentDailySection = shouldRefreshCurrentDailySection;
+module.exports.syncDailyRefreshHeaderActions = syncDailyRefreshHeaderActions;
 module.exports.sortCurrentFile = sortCurrentFile;
 module.exports.sortEditorTaskRegions = sortEditorTaskRegions;
 module.exports.toggleStatusOnLine = toggleStatusOnLine;

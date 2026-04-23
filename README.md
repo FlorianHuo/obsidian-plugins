@@ -51,6 +51,7 @@ npm run dev
 
 #### Unreleased
 
+- Add a manual `tracks/current.md` header action that can run once per Beijing day: rebuild `日常` from top-level Rhythms/Daily tasks, clear all Daily subtasks/statuses, and prune completed `[x]` items out of `主线 / 支线`
 - `Mod+L` now inserts a new unchecked task on blank lines, and on an empty unchecked task line it clears the line back to blank
 - `Mod+/` now places a newly in-progress task below existing `[/]` siblings and above unchecked `[ ]` siblings instead of forcing it to the very top
 - `Mod+L` keeps existing `[x]` siblings ahead of the newly completed task, so new done items append to the current completed group

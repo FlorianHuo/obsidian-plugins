@@ -4,6 +4,16 @@ const assert = require("node:assert/strict");
 const {
   applyStatusToLine,
   applyTaskStatusCommandToEditor,
+  addDailyRefreshHeaderAction,
+  buildRefreshedCurrentContent,
+  extractRhythmsDailyTasks,
+  getTodayDateStr,
+  isCurrentTracksFile,
+  refreshCurrentDailySection,
+  replaceCurrentDailySection,
+  removeDailyRefreshHeaderAction,
+  shouldRefreshCurrentDailySection,
+  syncDailyRefreshHeaderActions,
   setTaskStatus,
   toggleStatusOnLine,
   toggleTaskStatus,
@@ -41,6 +51,45 @@ function createMockEditor(lines, selection) {
         to: { ...to },
       };
     },
+  };
+}
+
+function createMockActionElement() {
+  return {
+    isConnected: true,
+    classList: {
+      values: new Set(),
+      add(value) {
+        this.values.add(value);
+      },
+    },
+    removeCalled: false,
+    remove() {
+      this.isConnected = false;
+      this.removeCalled = true;
+    },
+  };
+}
+
+function createMockLeaf(filePath) {
+  const actionElements = [];
+  const callbacks = [];
+  const view = {
+    file: filePath ? { path: filePath } : null,
+    addAction(icon, title, callback) {
+      const action = createMockActionElement();
+      action.icon = icon;
+      action.title = title;
+      actionElements.push(action);
+      callbacks.push(callback);
+      return action;
+    },
+  };
+
+  return {
+    view,
+    actionElements,
+    callbacks,
   };
 }
 
@@ -286,4 +335,327 @@ test("applyTaskStatusCommandToEditor places a new done task after existing compl
     from: { line: 2, ch: 6 },
     to: { line: 2, ch: 6 },
   });
+});
+
+test("extractRhythmsDailyTasks keeps only top-level Daily tasks and clears their status", () => {
+  const tracksContent = [
+    "## Active",
+    "",
+    "- something else",
+    "",
+    "## Rhythms",
+    "",
+    "**Daily**",
+    "- [x] 起床任务",
+    "  - [/] 子项目会被忽略",
+    "    deeper child",
+    "- [/] 读三篇论文",
+    "",
+    "**Weekly**",
+    "- 周一讨论班",
+  ].join("\n");
+
+  assert.deepEqual(extractRhythmsDailyTasks(tracksContent), [
+    "起床任务",
+    "读三篇论文",
+  ]);
+});
+
+test("replaceCurrentDailySection only rewrites the 日常 block", () => {
+  const currentContent = [
+    "",
+    "**今日：不能偏离主线**",
+    "",
+    "**日常**",
+    "",
+    "- [x] 昨天的日常",
+    "- [/] 另一个昨天的日常",
+    "",
+    "**主线**",
+    "",
+    "- [/] 重构 tracks 系统",
+    "",
+    "**支线**",
+    "",
+    "- [ ] 休学流程",
+    "",
+  ].join("\n");
+
+  const updated = replaceCurrentDailySection(currentContent, [
+    "起床任务",
+    "读三篇论文",
+  ]);
+
+  assert.equal(updated, [
+    "",
+    "**今日：不能偏离主线**",
+    "",
+    "**日常**",
+    "",
+    "- [ ] 起床任务",
+    "- [ ] 读三篇论文",
+    "",
+    "**主线**",
+    "",
+    "- [/] 重构 tracks 系统",
+    "",
+    "**支线**",
+    "",
+    "- [ ] 休学流程",
+    "",
+  ].join("\n"));
+});
+
+test("buildRefreshedCurrentContent rebuilds 日常 from Rhythms/Daily", () => {
+  const currentContent = [
+    "**日常**",
+    "",
+    "- [x] old",
+    "  - [ ] child to drop",
+    "",
+    "**主线**",
+    "",
+    "- [x] drop done root",
+    "  - [ ] dropped child",
+    "- [/] keep parent",
+    "  - [x] done child",
+    "  - [ ] keep child",
+    "- [ ] keep root",
+    "",
+    "**支线**",
+    "",
+    "- [x] drop done side root",
+    "- [ ] keep side root",
+    "  - [x] drop side child",
+    "  - [/] keep side child",
+  ].join("\n");
+  const tracksContent = [
+    "## Rhythms",
+    "",
+    "**Daily**",
+    "- [x] 起床任务",
+    "  - [ ] ignored child",
+    "- 读三篇论文",
+    "",
+    "**Weekly**",
+  ].join("\n");
+
+  assert.equal(
+    buildRefreshedCurrentContent(currentContent, tracksContent),
+    [
+      "**日常**",
+      "",
+      "- [ ] 起床任务",
+      "- [ ] 读三篇论文",
+      "",
+      "**主线**",
+      "",
+      "- [/] keep parent",
+      "  - [ ] keep child",
+      "- [ ] keep root",
+      "",
+      "**支线**",
+      "",
+      "- [ ] keep side root",
+      "  - [/] keep side child",
+    ].join("\n")
+  );
+});
+
+test("buildRefreshedCurrentContent keeps a single blank gap when Rhythms/Daily is empty", () => {
+  const currentContent = [
+    "**日常**",
+    "",
+    "- [x] old",
+    "",
+    "**主线**",
+    "",
+    "- [ ] keep",
+    "",
+    "**支线**",
+    "",
+    "- [x] drop",
+  ].join("\n");
+  const tracksContent = [
+    "## Rhythms",
+    "",
+    "**Daily**",
+    "",
+    "**Weekly**",
+  ].join("\n");
+
+  assert.equal(
+    buildRefreshedCurrentContent(currentContent, tracksContent),
+    [
+      "**日常**",
+      "",
+      "**主线**",
+      "",
+      "- [ ] keep",
+      "",
+      "**支线**",
+      "",
+    ].join("\n")
+  );
+});
+
+test("shouldRefreshCurrentDailySection only allows one refresh per Beijing day", () => {
+  assert.equal(shouldRefreshCurrentDailySection("2026-04-23", "2026-04-23"), false);
+  assert.equal(shouldRefreshCurrentDailySection("2026-04-22", "2026-04-23"), true);
+  assert.equal(shouldRefreshCurrentDailySection(undefined, "2026-04-23"), true);
+});
+
+test("getTodayDateStr uses the configured timezone instead of UTC", () => {
+  const date = new Date("2026-04-22T16:30:00.000Z");
+
+  assert.equal(getTodayDateStr("Asia/Shanghai", date), "2026-04-23");
+  assert.equal(getTodayDateStr("UTC", date), "2026-04-22");
+});
+
+test("refreshCurrentDailySection only allows one manual refresh per Beijing day", async () => {
+  const fileContents = new Map([
+    [
+      "tracks/tracks.md",
+      [
+        "## Rhythms",
+        "",
+        "**Daily**",
+        "",
+        "- [x] 起床任务",
+        "  - [x] 不应保留的子项目",
+        "- [/] 读三篇论文",
+        "",
+      ].join("\n"),
+    ],
+    [
+      "tracks/current.md",
+      [
+        "**今日：验证手动刷新**",
+        "",
+        "**日常**",
+        "",
+        "- [x] 旧的日常",
+        "  - [/] 旧的子项目",
+        "",
+        "**主线**",
+        "",
+        "- [x] 已完成主线",
+        "- [/] 保留中的主线",
+        "  - [x] 已完成子项目",
+        "  - [ ] 未完成子项目",
+        "",
+        "**支线**",
+        "",
+        "- [ ] 保留中的支线",
+        "",
+      ].join("\n"),
+    ],
+  ]);
+
+  const app = {
+    vault: {
+      getAbstractFileByPath(path) {
+        return fileContents.has(path) ? { path } : null;
+      },
+      async read(file) {
+        return fileContents.get(file.path);
+      },
+      async process(file, updater) {
+        fileContents.set(file.path, updater(fileContents.get(file.path)));
+      },
+    },
+  };
+  const pluginData = {};
+  const saveDataCalls = [];
+
+  const expectedCurrent = [
+    "**今日：验证手动刷新**",
+    "",
+    "**日常**",
+    "",
+    "- [ ] 起床任务",
+    "- [ ] 读三篇论文",
+    "",
+    "**主线**",
+    "",
+    "- [/] 保留中的主线",
+    "  - [ ] 未完成子项目",
+    "",
+    "**支线**",
+    "",
+    "- [ ] 保留中的支线",
+    "",
+  ].join("\n");
+
+  assert.equal(await refreshCurrentDailySection(app, pluginData, async (data) => {
+    saveDataCalls.push({ ...data });
+  }), true);
+  assert.equal(fileContents.get("tracks/current.md"), expectedCurrent);
+  assert.equal(pluginData.lastCurrentDailySyncDate, getTodayDateStr());
+  assert.deepEqual(saveDataCalls, [{ lastCurrentDailySyncDate: getTodayDateStr() }]);
+  assert.equal(await refreshCurrentDailySection(app, pluginData, async (data) => {
+    saveDataCalls.push({ ...data });
+  }), false);
+  assert.equal(fileContents.get("tracks/current.md"), expectedCurrent);
+  assert.deepEqual(saveDataCalls, [{ lastCurrentDailySyncDate: getTodayDateStr() }]);
+});
+
+test("isCurrentTracksFile only matches tracks/current.md", () => {
+  assert.equal(isCurrentTracksFile({ path: "tracks/current.md" }), true);
+  assert.equal(isCurrentTracksFile({ path: "tracks/tracks.md" }), false);
+  assert.equal(isCurrentTracksFile(null), false);
+});
+
+test("syncDailyRefreshHeaderActions adds a header action only for tracks/current.md and removes stale ones", () => {
+  const currentLeaf = createMockLeaf("tracks/current.md");
+  const otherLeaf = createMockLeaf("notes/other.md");
+  const plugin = {
+    app: {
+      workspace: {
+        iterateAllLeaves(callback) {
+          callback(currentLeaf);
+          callback(otherLeaf);
+        },
+      },
+    },
+    currentDailyHeaderActions: new Map(),
+    data: {},
+    saveDataCalls: [],
+    async saveData(data) {
+      this.saveDataCalls.push(data);
+    },
+  };
+
+  syncDailyRefreshHeaderActions(plugin, plugin.data);
+
+  assert.equal(currentLeaf.actionElements.length, 1);
+  assert.equal(otherLeaf.actionElements.length, 0);
+  assert.equal(plugin.currentDailyHeaderActions.get(currentLeaf), currentLeaf.actionElements[0]);
+
+  currentLeaf.view.file = { path: "notes/switched.md" };
+  syncDailyRefreshHeaderActions(plugin, plugin.data);
+
+  assert.equal(currentLeaf.actionElements[0].removeCalled, true);
+  assert.equal(plugin.currentDailyHeaderActions.has(currentLeaf), false);
+});
+
+test("addDailyRefreshHeaderAction reuses the existing connected action and removeDailyRefreshHeaderAction detaches it", () => {
+  const leaf = createMockLeaf("tracks/current.md");
+  const plugin = {
+    app: {},
+    data: {},
+    currentDailyHeaderActions: new Map(),
+    async saveData() {},
+  };
+
+  const firstAction = addDailyRefreshHeaderAction(plugin, leaf, plugin.data);
+  const secondAction = addDailyRefreshHeaderAction(plugin, leaf, plugin.data);
+
+  assert.equal(firstAction, secondAction);
+  assert.equal(leaf.actionElements.length, 1);
+
+  removeDailyRefreshHeaderAction(plugin, leaf);
+
+  assert.equal(firstAction.removeCalled, true);
+  assert.equal(plugin.currentDailyHeaderActions.has(leaf), false);
 });
