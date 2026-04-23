@@ -51,10 +51,15 @@ npm run dev
 
 #### Unreleased
 
+- Starting a child task now marks each ancestor task as in progress before sorting the affected branches
+- Completing a parent task now marks all descendant tasks as done before sorting the branch
 - Add a manual `tracks/current.md` header action that can run once per Beijing day: rebuild `日常` from top-level Rhythms/Daily tasks, clear all Daily subtasks/statuses, and prune completed `[x]` items out of `主线 / 支线`
 - `Mod+L` now inserts a new unchecked task on blank lines, and on an empty unchecked task line it clears the line back to blank
 - `Mod+/` now places a newly in-progress task below existing `[/]` siblings and above unchecked `[ ]` siblings instead of forcing it to the very top
 - `Mod+L` keeps existing `[x]` siblings ahead of the newly completed task, so new done items append to the current completed group
+- Native checkbox toggles now follow the same completed-sibling grouping rules as `Mod+L`, including nested sublists
+- Sorting a partial nested task region now preserves the trailing newline, so the next task no longer gets merged into the previous line
+- Native checkbox auto-sorting now runs as a follow-up edit instead of a same-transaction rewrite, which avoids Live Preview conflict markers
 
 #### v0.1.0 (2026-04-10)
 

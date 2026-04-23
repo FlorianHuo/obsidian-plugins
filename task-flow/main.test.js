@@ -6,9 +6,11 @@ const {
   applyTaskStatusCommandToEditor,
   addDailyRefreshHeaderAction,
   buildRefreshedCurrentContent,
+  completeDescendantTasksInLineArray,
   extractRhythmsDailyTasks,
   getTodayDateStr,
   isCurrentTracksFile,
+  markAncestorTasksInLineArray,
   refreshCurrentDailySection,
   replaceCurrentDailySection,
   removeDailyRefreshHeaderAction,
@@ -334,6 +336,148 @@ test("applyTaskStatusCommandToEditor places a new done task after existing compl
   assert.deepEqual(editor.selection, {
     from: { line: 2, ch: 6 },
     to: { line: 2, ch: 6 },
+  });
+});
+
+test("applyTaskStatusCommandToEditor places a new done subtask after existing completed siblings", () => {
+  const editor = createMockEditor(
+    [
+      "- [ ] parent",
+      "  - [ ] later",
+      "    later child",
+      "  - [x] done",
+      "    done child",
+      "  - [ ] now",
+      "    now child",
+    ],
+    {
+      from: { line: 5, ch: 6 },
+      to: { line: 5, ch: 6 },
+    }
+  );
+
+  applyTaskStatusCommandToEditor(editor, "x", true);
+
+  assert.deepEqual(editor.lines, [
+    "- [ ] parent",
+    "  - [ ] later",
+    "    later child",
+    "  - [x] done",
+    "    done child",
+    "  - [x] now",
+    "    now child",
+  ]);
+  assert.deepEqual(editor.selection, {
+    from: { line: 5, ch: 6 },
+    to: { line: 5, ch: 6 },
+  });
+});
+
+test("markAncestorTasksInLineArray marks each ancestor as in progress", () => {
+  const lines = [
+    "- [ ] top",
+    "  - [ ] middle",
+    "    - [/] child",
+    "      note that should stay as text",
+    "- [ ] sibling",
+  ];
+
+  const changedLineNumbers = markAncestorTasksInLineArray(lines, 2);
+
+  assert.deepEqual(changedLineNumbers, [1, 0]);
+  assert.deepEqual(lines, [
+    "- [/] top",
+    "  - [/] middle",
+    "    - [/] child",
+    "      note that should stay as text",
+    "- [ ] sibling",
+  ]);
+});
+
+test("applyTaskStatusCommandToEditor marks ancestor tasks in progress when a child starts", () => {
+  const editor = createMockEditor(
+    [
+      "- [ ] top later",
+      "- [ ] parent",
+      "  - [ ] child later",
+      "  - [ ] child now",
+      "- [x] done",
+    ],
+    {
+      from: { line: 3, ch: 6 },
+      to: { line: 3, ch: 6 },
+    }
+  );
+
+  applyTaskStatusCommandToEditor(editor, "/", true);
+
+  assert.deepEqual(editor.lines, [
+    "- [/] parent",
+    "  - [/] child now",
+    "  - [ ] child later",
+    "- [ ] top later",
+    "- [x] done",
+  ]);
+  assert.deepEqual(editor.selection, {
+    from: { line: 1, ch: 6 },
+    to: { line: 1, ch: 6 },
+  });
+});
+
+test("completeDescendantTasksInLineArray marks descendant tasks done without touching sibling branches", () => {
+  const lines = [
+    "- [x] parent",
+    "  - [ ] child 1",
+    "    note that should stay as text",
+    "  - [/] child 2",
+    "    - [ ] grandchild",
+    "",
+    "- [ ] sibling",
+  ];
+
+  const changedLineNumbers = completeDescendantTasksInLineArray(lines, 0);
+
+  assert.deepEqual(changedLineNumbers, [1, 3, 4]);
+  assert.deepEqual(lines, [
+    "- [x] parent",
+    "  - [x] child 1",
+    "    note that should stay as text",
+    "  - [x] child 2",
+    "    - [x] grandchild",
+    "",
+    "- [ ] sibling",
+  ]);
+});
+
+test("applyTaskStatusCommandToEditor marks descendant tasks done when a parent is completed", () => {
+  const editor = createMockEditor(
+    [
+      "- [ ] parent",
+      "  - [ ] child 1",
+      "    child note",
+      "  - [/] child 2",
+      "    - [ ] grandchild",
+      "- [ ] sibling",
+    ],
+    {
+      from: { line: 0, ch: 6 },
+      to: { line: 0, ch: 6 },
+    }
+  );
+
+  applyTaskStatusCommandToEditor(editor, "x", true);
+
+  assert.deepEqual(editor.lines, [
+    "- [ ] sibling",
+    "- [x] parent",
+    "  - [x] child 1",
+    "    child note",
+    "  - [x] child 2",
+    "    - [x] grandchild",
+  ]);
+  assert.deepEqual(editor.selection, {
+    from: { line: 1, ch: 6 },
+    to: { line: 1, ch: 6 },
   });
 });
 

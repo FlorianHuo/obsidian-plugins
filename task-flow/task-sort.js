@@ -184,6 +184,33 @@ function sortTaskRegionLines(
   };
 }
 
+function preserveTrailingNewlines(sourceText, sortedText) {
+  const sourceTrailingNewlineCount = sourceText.match(/\n*$/)?.[0].length ?? 0;
+  const sortedTrailingNewlineCount = sortedText.match(/\n*$/)?.[0].length ?? 0;
+
+  if (sortedTrailingNewlineCount >= sourceTrailingNewlineCount) {
+    return sortedText;
+  }
+
+  return `${sortedText}${"\n".repeat(sourceTrailingNewlineCount - sortedTrailingNewlineCount)}`;
+}
+
+function sortTaskRegionText(
+  regionText,
+  baseIndent,
+  preferredFrontLineOffsets = [],
+  preferredBackLineOffsets = []
+) {
+  const regionLines = regionText.split("\n");
+  const { newLines } = sortTaskRegionLines(
+    regionLines,
+    baseIndent,
+    preferredFrontLineOffsets,
+    preferredBackLineOffsets
+  );
+  return preserveTrailingNewlines(regionText, newLines.join("\n"));
+}
+
 function findSortableTaskRegionInLines(lines, lineIndex) {
   const line = lines[lineIndex];
   const taskMatch = line ? matchTaskLine(line) : null;
@@ -372,7 +399,7 @@ function sortTaskContent(content) {
     }
   }
 
-  return newLines.join("\n");
+  return preserveTrailingNewlines(content, newLines.join("\n"));
 }
 
 function isTaskCompletionChange(oldLine, newLine) {
@@ -400,5 +427,6 @@ module.exports = {
   parseTokens,
   removeCompletedContent,
   sortTaskContent,
+  sortTaskRegionText,
   sortTaskRegionLines,
 };

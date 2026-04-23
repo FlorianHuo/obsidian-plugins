@@ -4,6 +4,7 @@ let NoticeClass = class {};
 let ChangeSetClass = null;
 let EditorSelectionClass = null;
 let EditorStateClass = null;
+let EditorViewClass = null;
 
 try {
   ({
@@ -21,6 +22,14 @@ try {
     EditorSelection: EditorSelectionClass,
     EditorState: EditorStateClass,
   } = require("@codemirror/state"));
+} catch (error) {
+  // Allow local checks and tests outside Obsidian.
+}
+
+try {
+  ({
+    EditorView: EditorViewClass,
+  } = require("@codemirror/view"));
 } catch (error) {
   // Allow local checks and tests outside Obsidian.
 }
@@ -214,6 +223,33 @@ function createInlineTaskSortHelpers() {
     };
   }
 
+  function preserveTrailingNewlines(sourceText, sortedText) {
+    const sourceTrailingNewlineCount = sourceText.match(/\n*$/)?.[0].length ?? 0;
+    const sortedTrailingNewlineCount = sortedText.match(/\n*$/)?.[0].length ?? 0;
+
+    if (sortedTrailingNewlineCount >= sourceTrailingNewlineCount) {
+      return sortedText;
+    }
+
+    return `${sortedText}${"\n".repeat(sourceTrailingNewlineCount - sortedTrailingNewlineCount)}`;
+  }
+
+  function sortTaskRegionText(
+    regionText,
+    baseIndent,
+    preferredFrontLineOffsets = [],
+    preferredBackLineOffsets = []
+  ) {
+    const regionLines = regionText.split("\n");
+    const { newLines } = sortTaskRegionLines(
+      regionLines,
+      baseIndent,
+      preferredFrontLineOffsets,
+      preferredBackLineOffsets
+    );
+    return preserveTrailingNewlines(regionText, newLines.join("\n"));
+  }
+
   function findSortableTaskRegionInLines(lines, lineIndex) {
     const line = lines[lineIndex];
     const taskMatch = line ? matchTaskLine(line) : null;
@@ -357,6 +393,53 @@ function createInlineTaskSortHelpers() {
       }
     }
 
+    return preserveTrailingNewlines(content, newLines.join("\n"));
+  }
+
+  function removeCompletedContent(content) {
+    const lines = content.split("\n");
+    const newLines = [];
+
+    let i = 0;
+    while (i < lines.length) {
+      if (isTaskLine(lines[i])) {
+        const match = lines[i].match(/^(\s*)-\s*\[/);
+        const baseIndent = match[1];
+        const { tokens, nextIndex } = parseTokens(lines, i, baseIndent);
+        i = nextIndex;
+
+        let prevWasDroppedTask = false;
+        for (const tok of tokens) {
+          if (tok.type === "task") {
+            if (!tok.isCompleted) {
+              prevWasDroppedTask = false;
+              if (tok.lines.length > 1) {
+                const head = tok.lines[0];
+                const tail = tok.lines.slice(1).join("\n");
+                const processedTail = removeCompletedContent(tail);
+                newLines.push(head);
+                if (processedTail !== "") {
+                  newLines.push(...processedTail.split("\n"));
+                }
+              } else {
+                newLines.push(...tok.lines);
+              }
+            } else {
+              prevWasDroppedTask = true;
+            }
+          } else {
+            if (!prevWasDroppedTask) {
+              newLines.push(...tok.lines);
+            }
+            prevWasDroppedTask = false;
+          }
+        }
+      } else {
+        newLines.push(lines[i]);
+        i += 1;
+      }
+    }
+
     return newLines.join("\n");
   }
 
@@ -379,7 +462,9 @@ function createInlineTaskSortHelpers() {
     mapPositionThroughSortedRegion,
     matchTaskLine,
     parseTokens,
+    removeCompletedContent,
     sortTaskContent,
+    sortTaskRegionText,
     sortTaskRegionLines,
   };
 }
@@ -402,6 +487,7 @@ const {
   parseTokens,
   removeCompletedContent,
   sortTaskContent,
+  sortTaskRegionText,
   sortTaskRegionLines,
 } = loadTaskSortHelpers();
 
@@ -617,7 +703,6 @@ function buildRefreshedCurrentContent(currentContent, tracksContent) {
   return preserveTrailingNewlines(currentContent, refreshedLines.join("\n"));
 }
 
-
 function createMarkerReplacement(prefix, oldMarker, suffix, statusChar) {
   const updatedLine = `${prefix}[${statusChar}]${suffix}`;
   const markerStart = prefix.length + 1;
@@ -804,6 +889,153 @@ function getEditorLineCount(editor) {
   return 0;
 }
 
+function findTaskSubtreeEndInLines(lines, lineNumber) {
+  const taskMatch = matchTaskLine(lines[lineNumber]);
+  if (!taskMatch) return lineNumber;
+
+  const baseIndentLength = taskMatch[1].length;
+  let endLine = lineNumber;
+
+  while (endLine < lines.length - 1) {
+    const nextLine = lines[endLine + 1];
+    if (nextLine.trim() === "") {
+      endLine += 1;
+      continue;
+    }
+
+    if (getIndent(nextLine).length > baseIndentLength) {
+      endLine += 1;
+      continue;
+    }
+
+    break;
+  }
+
+  return endLine;
+}
+
+function completeDescendantTasksInLineArray(lines, parentLineNumber) {
+  const parentTask = matchTaskLine(lines[parentLineNumber]);
+  if (!parentTask || parentTask[2].toLowerCase() !== "x") {
+    return [];
+  }
+
+  const parentIndentLength = parentTask[1].length;
+  const subtreeEndLine = findTaskSubtreeEndInLines(lines, parentLineNumber);
+  const changedLineNumbers = [];
+
+  for (let lineNumber = parentLineNumber + 1; lineNumber <= subtreeEndLine; lineNumber += 1) {
+    const taskMatch = matchTaskLine(lines[lineNumber]);
+    if (!taskMatch || taskMatch[1].length <= parentIndentLength) {
+      continue;
+    }
+
+    if (taskMatch[2].toLowerCase() === "x") {
+      continue;
+    }
+
+    lines[lineNumber] = applyStatusToLine(lines[lineNumber], "x");
+    changedLineNumbers.push(lineNumber);
+  }
+
+  return changedLineNumbers;
+}
+
+function completeDescendantTasksInEditor(editor, parentLineNumbers) {
+  const lineCount = getEditorLineCount(editor);
+  if (lineCount === 0 || parentLineNumbers.length === 0) {
+    return [];
+  }
+
+  const lines = Array.from({ length: lineCount }, (_, index) => editor.getLine(index));
+  const changedLineNumbers = new Set();
+
+  for (const parentLineNumber of [...new Set(parentLineNumbers)].sort((a, b) => a - b)) {
+    if (parentLineNumber < 0 || parentLineNumber >= lineCount) {
+      continue;
+    }
+
+    for (const changedLineNumber of completeDescendantTasksInLineArray(lines, parentLineNumber)) {
+      changedLineNumbers.add(changedLineNumber);
+    }
+  }
+
+  for (const lineNumber of changedLineNumbers) {
+    editor.setLine(lineNumber, lines[lineNumber]);
+  }
+
+  return [...changedLineNumbers].sort((a, b) => a - b);
+}
+
+function markAncestorTasksInLineArray(lines, childLineNumber) {
+  const childTask = matchTaskLine(lines[childLineNumber]);
+  if (!childTask || childTask[2] !== "/") {
+    return [];
+  }
+
+  let currentIndentLength = childTask[1].length;
+  if (currentIndentLength === 0) {
+    return [];
+  }
+
+  const changedLineNumbers = [];
+
+  for (let lineNumber = childLineNumber - 1; lineNumber >= 0; lineNumber -= 1) {
+    const line = lines[lineNumber];
+    if (line.trim() === "") {
+      continue;
+    }
+
+    const taskMatch = matchTaskLine(line);
+    if (!taskMatch) {
+      continue;
+    }
+
+    const indentLength = taskMatch[1].length;
+    if (indentLength >= currentIndentLength) {
+      continue;
+    }
+
+    if (taskMatch[2] !== "/") {
+      lines[lineNumber] = applyStatusToLine(lines[lineNumber], "/");
+      changedLineNumbers.push(lineNumber);
+    }
+
+    currentIndentLength = indentLength;
+    if (currentIndentLength === 0) {
+      break;
+    }
+  }
+
+  return changedLineNumbers;
+}
+
+function markAncestorTasksInEditor(editor, childLineNumbers) {
+  const lineCount = getEditorLineCount(editor);
+  if (lineCount === 0 || childLineNumbers.length === 0) {
+    return [];
+  }
+
+  const lines = Array.from({ length: lineCount }, (_, index) => editor.getLine(index));
+  const changedLineNumbers = new Set();
+
+  for (const childLineNumber of [...new Set(childLineNumbers)].sort((a, b) => a - b)) {
+    if (childLineNumber < 0 || childLineNumber >= lineCount) {
+      continue;
+    }
+
+    for (const changedLineNumber of markAncestorTasksInLineArray(lines, childLineNumber)) {
+      changedLineNumbers.add(changedLineNumber);
+    }
+  }
+
+  for (const lineNumber of changedLineNumbers) {
+    editor.setLine(lineNumber, lines[lineNumber]);
+  }
+
+  return [...changedLineNumbers].sort((a, b) => a - b);
+}
+
 function updateEditorLines(editor, lineTransformer) {
   const { from, to, isSelection, startLine, endLine } = getSelectedLineRange(editor);
   const transformedLines = [];
@@ -901,7 +1133,7 @@ function sortEditorTaskRegions(
   let to = editor.getCursor("to");
   const isSelection = from.line !== to.line || from.ch !== to.ch;
 
-  for (const region of [...regions.values()].sort((a, b) => a.startLine - b.startLine)) {
+  for (const region of [...regions.values()].sort((a, b) => b.startLine - a.startLine)) {
     const regionLines = allLines.slice(region.startLine, region.endLine + 1);
     const {
       tokens,
@@ -960,6 +1192,8 @@ function applyTaskStatusCommandToEditor(editor, statusChar, isToggle) {
   const preferredBackLineNumbers = [];
   const preferredFrontLineNumbers = [];
   const affectedTaskLines = [];
+  const completedParentLineNumbers = [];
+  const inProgressLineNumbers = [];
 
   for (const transformed of update.transformedLines) {
     if (transformed.line === transformed.previousLine) continue;
@@ -970,10 +1204,28 @@ function applyTaskStatusCommandToEditor(editor, statusChar, isToggle) {
     affectedTaskLines.push(transformed.lineNumber);
     if (taskMatch[2] === "/") {
       preferredFrontLineNumbers.push(transformed.lineNumber);
+      inProgressLineNumbers.push(transformed.lineNumber);
     }
     if (taskMatch[2].toLowerCase() === "x") {
       preferredBackLineNumbers.push(transformed.lineNumber);
+      completedParentLineNumbers.push(transformed.lineNumber);
     }
+  }
+
+  for (const changedLineNumber of markAncestorTasksInEditor(
+    editor,
+    inProgressLineNumbers
+  )) {
+    affectedTaskLines.push(changedLineNumber);
+    preferredFrontLineNumbers.push(changedLineNumber);
+  }
+
+  for (const changedLineNumber of completeDescendantTasksInEditor(
+    editor,
+    completedParentLineNumbers
+  )) {
+    affectedTaskLines.push(changedLineNumber);
+    preferredBackLineNumbers.push(changedLineNumber);
   }
 
   sortEditorTaskRegions(
@@ -1125,6 +1377,8 @@ function findSortableTaskRegion(doc, lineNumber) {
   if (end < start) return null;
 
   return {
+    startLine: start,
+    endLine: end,
     from: doc.line(start).from,
     to: end < doc.lines ? doc.line(end + 1).from : doc.line(end).to,
     baseIndent,
@@ -1136,16 +1390,22 @@ function collectTaskBlocks(regionText, baseIndent) {
   const { tokens } = parseTokens(lines, 0, baseIndent);
   const tasks = [];
   const seen = new Map();
+  const seenHeadLines = new Map();
   let offset = 0;
   let consumedLines = 0;
 
   for (const token of tokens) {
     const text = token.lines.join("\n");
+    const headText = token.lines[0] || "";
     if (token.type === "task") {
       const occurrence = seen.get(text) || 0;
+      const headOccurrence = seenHeadLines.get(headText) || 0;
       seen.set(text, occurrence + 1);
+      seenHeadLines.set(headText, headOccurrence + 1);
       tasks.push({
         from: offset,
+        headOccurrence,
+        headText,
         to: offset + text.length,
         text,
         occurrence,
@@ -1189,7 +1449,14 @@ function remapSelectionIntoSortedTask(
   const newTask = newTasks.find(
     (task) => task.text === oldTask.text && task.occurrence === oldTask.occurrence
   );
-  if (!newTask) return mappedSelection;
+  const fallbackTask =
+    newTask ||
+    newTasks.find(
+      (task) =>
+        task.headText === oldTask.headText &&
+        task.headOccurrence === oldTask.headOccurrence
+    );
+  if (!fallbackTask) return mappedSelection;
 
   const originalMain = originalSelection.main;
   const oldTaskFrom = region.from + oldTask.from;
@@ -1203,8 +1470,8 @@ function remapSelectionIntoSortedTask(
     return mappedSelection;
   }
 
-  const newTaskFrom = region.from + newTask.from;
-  const newTaskTo = region.from + newTask.to;
+  const newTaskFrom = region.from + fallbackTask.from;
+  const newTaskTo = region.from + fallbackTask.to;
   const anchor = mapPosIntoTask(
     originalMain.anchor,
     oldTaskFrom,
@@ -1232,44 +1499,96 @@ function remapSelectionIntoSortedTask(
   return EditorSelectionClass.create(ranges, mappedSelection.mainIndex);
 }
 
-function buildTaskSortExtension() {
-  if (!EditorStateClass || !ChangeSetClass || !EditorSelectionClass) {
+function buildSortedToggleTransactionSpec(doc, selection, toggle) {
+  if (!ChangeSetClass || !EditorSelectionClass) {
     return null;
   }
 
-  return EditorStateClass.transactionFilter.of((tr) => {
-    const toggle = getCheckboxToggleInfo(tr);
-    if (!toggle) return tr;
+  const region = findSortableTaskRegion(doc, toggle.lineNumber);
+  if (!region) return null;
 
-    const region = findSortableTaskRegion(tr.newDoc, toggle.lineNumber);
-    if (!region) return tr;
+  const regionText = doc.sliceString(region.from, region.to);
+  const toggledTask = matchTaskLine(doc.line(toggle.lineNumber).text);
+  const toggledLineOffset = toggle.lineNumber - region.startLine;
+  const preferredFrontLineOffsets = [];
+  const preferredBackLineOffsets = [];
 
-    const regionText = tr.newDoc.sliceString(region.from, region.to);
-    const sortedRegion = sortTaskContent(regionText);
-    if (sortedRegion === regionText) return tr;
+  if (toggledTask) {
+    if (toggledTask[2] === "/") {
+      preferredFrontLineOffsets.push(toggledLineOffset);
+    }
+    if (toggledTask[2].toLowerCase() === "x") {
+      preferredBackLineOffsets.push(toggledLineOffset);
+    }
+  }
 
-    const replacement = ChangeSetClass.of(
-      [{ from: region.from, to: region.to, insert: sortedRegion }],
-      tr.newDoc.length
+  let regionContent = regionText;
+  if (toggledTask?.[2].toLowerCase() === "x") {
+    const regionLines = regionText.split("\n");
+    const changedLineOffsets = completeDescendantTasksInLineArray(
+      regionLines,
+      toggledLineOffset
     );
-    const mappedSelection = tr.newSelection.map(replacement);
-    const finalSelection = remapSelectionIntoSortedTask(
-      tr.newSelection,
-      mappedSelection,
-      region,
-      regionText,
-      sortedRegion,
-      toggle.pos
-    );
+    if (changedLineOffsets.length > 0) {
+      regionContent = preserveTrailingNewlines(regionText, regionLines.join("\n"));
+    }
+  }
 
-    return [
-      tr,
-      {
-        sequential: true,
-        changes: [{ from: region.from, to: region.to, insert: sortedRegion }],
-        selection: finalSelection,
-      },
-    ];
+  const sortedRegion = sortTaskRegionText(
+    regionContent,
+    region.baseIndent,
+    preferredFrontLineOffsets,
+    preferredBackLineOffsets
+  );
+  if (sortedRegion === regionText) return null;
+
+  const replacement = ChangeSetClass.of(
+    [{ from: region.from, to: region.to, insert: sortedRegion }],
+    doc.length
+  );
+  const mappedSelection = selection.map(replacement);
+  const finalSelection = remapSelectionIntoSortedTask(
+    selection,
+    mappedSelection,
+    region,
+    regionText,
+    sortedRegion,
+    toggle.pos
+  );
+
+  return {
+    changes: [{ from: region.from, to: region.to, insert: sortedRegion }],
+    filter: false,
+    selection: finalSelection,
+  };
+}
+
+function buildTaskSortExtension() {
+  if (!EditorViewClass || !ChangeSetClass || !EditorSelectionClass) {
+    return null;
+  }
+
+  return EditorViewClass.updateListener.of((update) => {
+    if (!update.docChanged) return;
+
+    let toggle = null;
+    for (const transaction of update.transactions) {
+      const currentToggle = getCheckboxToggleInfo(transaction);
+      if (!currentToggle) continue;
+      if (toggle) return;
+      toggle = currentToggle;
+    }
+
+    if (!toggle) return;
+
+    const spec = buildSortedToggleTransactionSpec(
+      update.state.doc,
+      update.state.selection,
+      toggle
+    );
+    if (!spec) return;
+
+    update.view.dispatch(spec);
   });
 }
 
@@ -1518,9 +1837,11 @@ module.exports.runTaskStatusCommand = runTaskStatusCommand;
 module.exports.buildRefreshedCurrentContent = buildRefreshedCurrentContent;
 module.exports.extractRhythmsDailyTasks = extractRhythmsDailyTasks;
 module.exports.addDailyRefreshHeaderAction = addDailyRefreshHeaderAction;
+module.exports.completeDescendantTasksInLineArray = completeDescendantTasksInLineArray;
 module.exports.getMarkdownLeaves = getMarkdownLeaves;
 module.exports.getTodayDateStr = getTodayDateStr;
 module.exports.isCurrentTracksFile = isCurrentTracksFile;
+module.exports.markAncestorTasksInLineArray = markAncestorTasksInLineArray;
 module.exports.registerDailyRefreshHeaderActions = registerDailyRefreshHeaderActions;
 module.exports.removeDailyRefreshHeaderAction = removeDailyRefreshHeaderAction;
 module.exports.refreshCurrentDailySection = refreshCurrentDailySection;

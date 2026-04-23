@@ -5,6 +5,7 @@ const {
   findSortableTaskRegionInLines,
   matchTaskLine,
   sortTaskContent,
+  sortTaskRegionText,
   sortTaskRegionLines,
 } = require("./task-sort.js");
 
@@ -81,4 +82,49 @@ test("sortTaskRegionLines keeps a newly completed task below existing completed 
     "- [x] done",
     "- [x] now",
   ]);
+});
+
+test("sortTaskRegionText keeps a newly completed subtask below existing completed siblings", () => {
+  const input = [
+    "  - [ ] later",
+    "    later child",
+    "  - [x] done",
+    "    done child",
+    "  - [x] now",
+    "    now child",
+  ].join("\n");
+  const expected = [
+    "  - [ ] later",
+    "    later child",
+    "  - [x] done",
+    "    done child",
+    "  - [x] now",
+    "    now child",
+  ].join("\n");
+
+  assert.equal(sortTaskRegionText(input, "  ", [], [4]), expected);
+});
+
+test("sortTaskRegionText preserves the trailing newline of a partial region", () => {
+  const input = [
+    "  - [ ] later",
+    "  - [x] done",
+    "  - [x] now",
+    "",
+  ].join("\n");
+  const expected = [
+    "  - [ ] later",
+    "  - [x] done",
+    "  - [x] now",
+    "",
+  ].join("\n");
+
+  assert.equal(sortTaskRegionText(input, "  ", [], [2]), expected);
+});
+
+test("sortTaskContent preserves a trailing newline", () => {
+  const input = ["- [x] done", "- [ ] later", ""].join("\n");
+  const expected = ["- [ ] later", "- [x] done", ""].join("\n");
+
+  assert.equal(sortTaskContent(input), expected);
 });
