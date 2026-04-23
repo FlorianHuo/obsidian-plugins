@@ -7,6 +7,7 @@ const {
   addDailyRefreshHeaderAction,
   buildRefreshedCurrentContent,
   completeDescendantTasksInLineArray,
+  createInlineTaskSortHelpers,
   extractRhythmsDailyTasks,
   getTodayDateStr,
   isCurrentTracksFile,
@@ -250,6 +251,15 @@ test("toggleTaskStatus applies line-by-line across a selection without touching 
   });
 });
 
+test("createInlineTaskSortHelpers exposes isCompletedTaskMarker for the runtime fallback", () => {
+  const helpers = createInlineTaskSortHelpers();
+
+  assert.equal(typeof helpers.isCompletedTaskMarker, "function");
+  assert.equal(helpers.isCompletedTaskMarker("x"), true);
+  assert.equal(helpers.isCompletedTaskMarker("X"), true);
+  assert.equal(helpers.isCompletedTaskMarker("/"), false);
+});
+
 test("applyTaskStatusCommandToEditor moves an in-progress task to the front of its current branch", () => {
   const editor = createMockEditor(
     ["- [ ] later", "- [ ] now", "- [x] done"],
@@ -308,16 +318,16 @@ test("applyTaskStatusCommandToEditor moves a done task to the bottom of its curr
 
   assert.deepEqual(editor.lines, [
     "- [ ] later",
-    "- [x] done",
     "- [x] now",
+    "- [x] done",
   ]);
   assert.deepEqual(editor.selection, {
-    from: { line: 2, ch: 6 },
-    to: { line: 2, ch: 6 },
+    from: { line: 1, ch: 6 },
+    to: { line: 1, ch: 6 },
   });
 });
 
-test("applyTaskStatusCommandToEditor places a new done task after existing completed siblings", () => {
+test("applyTaskStatusCommandToEditor places a new done task before existing completed siblings", () => {
   const editor = createMockEditor(
     ["- [/] now", "- [x] done 1", "- [x] done 2"],
     {
@@ -329,30 +339,30 @@ test("applyTaskStatusCommandToEditor places a new done task after existing compl
   applyTaskStatusCommandToEditor(editor, "x", true);
 
   assert.deepEqual(editor.lines, [
+    "- [x] now",
     "- [x] done 1",
     "- [x] done 2",
-    "- [x] now",
   ]);
   assert.deepEqual(editor.selection, {
-    from: { line: 2, ch: 6 },
-    to: { line: 2, ch: 6 },
+    from: { line: 0, ch: 6 },
+    to: { line: 0, ch: 6 },
   });
 });
 
-test("applyTaskStatusCommandToEditor places a new done subtask after existing completed siblings", () => {
+test("applyTaskStatusCommandToEditor places a new done subtask before existing completed siblings", () => {
   const editor = createMockEditor(
     [
       "- [ ] parent",
       "  - [ ] later",
       "    later child",
-      "  - [x] done",
-      "    done child",
       "  - [ ] now",
       "    now child",
+      "  - [x] done",
+      "    done child",
     ],
     {
-      from: { line: 5, ch: 6 },
-      to: { line: 5, ch: 6 },
+      from: { line: 3, ch: 6 },
+      to: { line: 3, ch: 6 },
     }
   );
 
@@ -362,14 +372,14 @@ test("applyTaskStatusCommandToEditor places a new done subtask after existing co
     "- [ ] parent",
     "  - [ ] later",
     "    later child",
-    "  - [x] done",
-    "    done child",
     "  - [x] now",
     "    now child",
+    "  - [x] done",
+    "    done child",
   ]);
   assert.deepEqual(editor.selection, {
-    from: { line: 5, ch: 6 },
-    to: { line: 5, ch: 6 },
+    from: { line: 3, ch: 6 },
+    to: { line: 3, ch: 6 },
   });
 });
 

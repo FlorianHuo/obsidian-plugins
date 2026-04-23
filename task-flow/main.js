@@ -168,8 +168,8 @@ function createInlineTaskSortHelpers() {
       ...currentInProgress,
       ...preferredIncomplete,
       ...remainingIncomplete,
-      ...remainingComplete,
       ...preferredComplete,
+      ...remainingComplete,
     ];
   }
 
@@ -458,6 +458,7 @@ function createInlineTaskSortHelpers() {
   return {
     findSortableTaskRegionInLines,
     getIndent,
+    isCompletedTaskMarker,
     isTaskCompletionChange,
     mapPositionThroughSortedRegion,
     matchTaskLine,
@@ -481,6 +482,7 @@ function loadTaskSortHelpers() {
 const {
   findSortableTaskRegionInLines,
   getIndent,
+  isCompletedTaskMarker,
   isTaskCompletionChange,
   mapPositionThroughSortedRegion,
   matchTaskLine,
@@ -1206,7 +1208,7 @@ function applyTaskStatusCommandToEditor(editor, statusChar, isToggle) {
       preferredFrontLineNumbers.push(transformed.lineNumber);
       inProgressLineNumbers.push(transformed.lineNumber);
     }
-    if (taskMatch[2].toLowerCase() === "x") {
+    if (isCompletedTaskMarker(taskMatch[2])) {
       preferredBackLineNumbers.push(transformed.lineNumber);
       completedParentLineNumbers.push(transformed.lineNumber);
     }
@@ -1517,13 +1519,13 @@ function buildSortedToggleTransactionSpec(doc, selection, toggle) {
     if (toggledTask[2] === "/") {
       preferredFrontLineOffsets.push(toggledLineOffset);
     }
-    if (toggledTask[2].toLowerCase() === "x") {
+    if (isCompletedTaskMarker(toggledTask[2])) {
       preferredBackLineOffsets.push(toggledLineOffset);
     }
   }
 
   let regionContent = regionText;
-  if (toggledTask?.[2].toLowerCase() === "x") {
+  if (isCompletedTaskMarker(toggledTask?.[2])) {
     const regionLines = regionText.split("\n");
     const changedLineOffsets = completeDescendantTasksInLineArray(
       regionLines,
@@ -1830,6 +1832,7 @@ module.exports.default = TaskStatusShortcutsPlugin;
 module.exports.applyStatusToLine = applyStatusToLine;
 module.exports.applyTaskStatusCommandToEditor = applyTaskStatusCommandToEditor;
 module.exports.buildTaskSortExtension = buildTaskSortExtension;
+module.exports.createInlineTaskSortHelpers = createInlineTaskSortHelpers;
 module.exports.ensureEditableMarkdownEditor = ensureEditableMarkdownEditor;
 module.exports.getActiveMarkdownEditor = getActiveMarkdownEditor;
 module.exports.getActiveMarkdownView = getActiveMarkdownView;

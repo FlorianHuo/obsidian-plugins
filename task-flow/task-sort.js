@@ -129,8 +129,8 @@ function buildSortedTaskList(tokens, preferredFrontTasks, preferredBackTasks) {
     ...currentInProgress,
     ...preferredIncomplete,
     ...remainingIncomplete,
-    ...remainingComplete,
     ...preferredComplete,
+    ...remainingComplete,
   ];
 }
 

@@ -69,13 +69,13 @@ test("sortTaskRegionLines keeps a newly in-progress task below existing in-progr
   ]);
 });
 
-test("sortTaskRegionLines keeps a newly completed task below existing completed siblings", () => {
+test("sortTaskRegionLines keeps a newly completed task above existing completed siblings", () => {
   const regionLines = [
     "- [ ] later",
     "- [x] done",
     "- [x] now",
   ];
-  const { newLines } = sortTaskRegionLines(regionLines, "", [], [2]);
+  const { newLines } = sortTaskRegionLines(regionLines, "", [], [1]);
 
   assert.deepEqual(newLines, [
     "- [ ] later",
@@ -84,7 +84,7 @@ test("sortTaskRegionLines keeps a newly completed task below existing completed 
   ]);
 });
 
-test("sortTaskRegionText keeps a newly completed subtask below existing completed siblings", () => {
+test("sortTaskRegionText keeps a newly completed subtask above existing completed siblings", () => {
   const input = [
     "  - [ ] later",
     "    later child",
@@ -102,7 +102,7 @@ test("sortTaskRegionText keeps a newly completed subtask below existing complete
     "    now child",
   ].join("\n");
 
-  assert.equal(sortTaskRegionText(input, "  ", [], [4]), expected);
+  assert.equal(sortTaskRegionText(input, "  ", [], [2]), expected);
 });
 
 test("sortTaskRegionText preserves the trailing newline of a partial region", () => {
@@ -119,7 +119,7 @@ test("sortTaskRegionText preserves the trailing newline of a partial region", ()
     "",
   ].join("\n");
 
-  assert.equal(sortTaskRegionText(input, "  ", [], [2]), expected);
+  assert.equal(sortTaskRegionText(input, "  ", [], [1]), expected);
 });
 
 test("sortTaskContent preserves a trailing newline", () => {
