@@ -4,18 +4,26 @@ const assert = require("node:assert/strict");
 const {
   applyStatusToLine,
   applyTaskStatusCommandToEditor,
+  applyCurrentDaySettlementToShopContent,
   addDailyRefreshHeaderAction,
   buildRefreshedCurrentContent,
+  collectCompletedTaskCacheBlocks,
   completeDescendantTasksInLineArray,
   createInlineTaskSortHelpers,
+  extractCachedCompletedDailyTaskTexts,
+  extractCompletedMainlineSettlementItems,
+  extractCurrentRefreshCacheEntries,
   extractRhythmsDailyTasks,
+  getCurrentDailyCacheFilePath,
   getTodayDateStr,
   isCurrentTracksFile,
   markAncestorTasksInLineArray,
+  mergeCurrentDailyCacheContent,
+  parseCurrentDailyCacheEntries,
+  renderCurrentDaySettlementPreview,
   refreshCurrentDailySection,
   replaceCurrentDailySection,
   removeDailyRefreshHeaderAction,
-  shouldRefreshCurrentDailySection,
   syncDailyRefreshHeaderActions,
   setTaskStatus,
   toggleStatusOnLine,
@@ -653,10 +661,191 @@ test("buildRefreshedCurrentContent keeps a single blank gap when Rhythms/Daily i
   );
 });
 
-test("shouldRefreshCurrentDailySection only allows one refresh per Beijing day", () => {
-  assert.equal(shouldRefreshCurrentDailySection("2026-04-23", "2026-04-23"), false);
-  assert.equal(shouldRefreshCurrentDailySection("2026-04-22", "2026-04-23"), true);
-  assert.equal(shouldRefreshCurrentDailySection(undefined, "2026-04-23"), true);
+test("collectCompletedTaskCacheBlocks keeps parent context for completed children", () => {
+  const content = [
+    "- [/] 父项目",
+    "  - [x] 已完成子项目",
+    "    - [ ] 子项目备注",
+    "  - [ ] 未完成子项目",
+    "- [x] 已完成顶层",
+    "  - [ ] 顶层子项目",
+  ].join("\n");
+
+  assert.deepEqual(collectCompletedTaskCacheBlocks(content), [
+    [
+      "- [/] 父项目",
+      "  - [x] 已完成子项目",
+      "    - [ ] 子项目备注",
+    ].join("\n"),
+    [
+      "- [x] 已完成顶层",
+      "  - [ ] 顶层子项目",
+    ].join("\n"),
+  ]);
+});
+
+test("mergeCurrentDailyCacheContent appends by section without duplicating blocks", () => {
+  const date = "2026-04-28";
+  const existingContent = [
+    "# 2026-04-28",
+    "",
+    "## 日常",
+    "",
+    "- [x] 起床任务",
+    "",
+    "## 主线",
+    "",
+    "## 支线",
+    "",
+  ].join("\n");
+
+  const merged = mergeCurrentDailyCacheContent(existingContent, date, {
+    "日常": ["- [x] 起床任务", "- [x] 读三篇论文"],
+    "主线": [
+      [
+        "- [/] 父项目",
+        "  - [x] 已完成子项目",
+      ].join("\n"),
+    ],
+    "支线": [],
+  });
+
+  assert.deepEqual(parseCurrentDailyCacheEntries(merged), {
+    "日常": ["- [x] 起床任务", "- [x] 读三篇论文"],
+    "主线": [
+      [
+        "- [/] 父项目",
+        "  - [x] 已完成子项目",
+      ].join("\n"),
+    ],
+    "支线": [],
+  });
+  assert.deepEqual(extractCachedCompletedDailyTaskTexts(merged), new Set([
+    "起床任务",
+    "读三篇论文",
+  ]));
+  assert.equal(merged, [
+    "# 2026-04-28",
+    "",
+    "## 日常",
+    "",
+    "- [x] 起床任务",
+    "- [x] 读三篇论文",
+    "",
+    "## 主线",
+    "",
+    "- [/] 父项目",
+    "  - [x] 已完成子项目",
+    "",
+    "## 支线",
+    "",
+  ].join("\n"));
+});
+
+test("extractCompletedMainlineSettlementItems only uses completed top-level mainline tasks", () => {
+  const cacheContent = [
+    "# 2026-04-28",
+    "",
+    "## 日常",
+    "",
+    "- [x] 起床任务",
+    "",
+    "## 主线",
+    "",
+    "- [/] 未完成父项目",
+    "  - [x] 已完成子项目",
+    "- [x] 已完成主线",
+    "  - [x] 已完成主线子项",
+    "- [x] 已完成主线",
+    "",
+    "## 支线",
+    "",
+    "- [x] 已完成支线",
+    "",
+  ].join("\n");
+
+  const items = extractCompletedMainlineSettlementItems(cacheContent);
+
+  assert.deepEqual(items, [
+    {
+      points: 3,
+      title: "已完成主线",
+    },
+  ]);
+  assert.equal(
+    renderCurrentDaySettlementPreview("2026-04-28", items),
+    [
+      "Settle 2026-04-28: 1 completed mainline item(s), +3 points.",
+      "+3 完成主线：已完成主线",
+    ].join("\n")
+  );
+});
+
+test("applyCurrentDaySettlementToShopContent updates balance and inserts ledger rows under current action", () => {
+  const shopContent = [
+    "",
+    "**余额：-279 | 当前连续：0 天 | 最长记录：8 天**",
+    "",
+    "**规则**",
+    "",
+    "**流水**",
+    "",
+    "**斯大林格勒（2026-04-08 起）**",
+    "",
+    "2026-04-27 | 0 | 准备阶段 | 余额 -279",
+  ].join("\n");
+
+  const result = applyCurrentDaySettlementToShopContent(
+    shopContent,
+    "2026-04-28",
+    [
+      { points: 3, title: "完成 A" },
+      { points: 3, title: "完成 B" },
+    ]
+  );
+
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.settledItems, [
+    { points: 3, title: "完成 A" },
+    { points: 3, title: "完成 B" },
+  ]);
+  assert.equal(result.content, [
+    "",
+    "**余额：-273 | 当前连续：0 天 | 最长记录：8 天**",
+    "",
+    "**规则**",
+    "",
+    "**流水**",
+    "",
+    "**斯大林格勒（2026-04-08 起）**",
+    "2026-04-28 | +3 | 完成主线：完成 A | 余额 -276",
+    "2026-04-28 | +3 | 完成主线：完成 B | 余额 -273",
+    "",
+    "2026-04-27 | 0 | 准备阶段 | 余额 -279",
+  ].join("\n"));
+});
+
+test("applyCurrentDaySettlementToShopContent skips already settled mainline titles", () => {
+  const shopContent = [
+    "**余额：-276 | 当前连续：0 天 | 最长记录：8 天**",
+    "",
+    "**流水**",
+    "",
+    "**斯大林格勒（2026-04-08 起）**",
+    "2026-04-28 | +3 | 完成主线：完成 A | 余额 -276",
+  ].join("\n");
+
+  const result = applyCurrentDaySettlementToShopContent(
+    shopContent,
+    "2026-04-28",
+    [
+      { points: 3, title: "完成 A" },
+    ]
+  );
+
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.settledItems, []);
+  assert.equal(result.content, shopContent);
 });
 
 test("getTodayDateStr uses the configured timezone instead of UTC", () => {
@@ -666,30 +855,32 @@ test("getTodayDateStr uses the configured timezone instead of UTC", () => {
   assert.equal(getTodayDateStr("UTC", date), "2026-04-22");
 });
 
-test("refreshCurrentDailySection only allows one manual refresh per Beijing day", async () => {
+test("refreshCurrentDailySection writes cache and can run repeatedly in one day", async () => {
+  const today = getTodayDateStr();
+  const cachePath = getCurrentDailyCacheFilePath(today);
+  const folders = new Set(["01-tracks"]);
   const fileContents = new Map([
     [
-      "tracks/tracks.md",
+      "01-tracks/tracks.md",
       [
         "## Rhythms",
         "",
         "**Daily**",
         "",
-        "- [x] 起床任务",
-        "  - [x] 不应保留的子项目",
-        "- [/] 读三篇论文",
+        "- 起床任务",
+        "- 读三篇论文",
         "",
       ].join("\n"),
     ],
     [
-      "tracks/current.md",
+      "01-tracks/current.md",
       [
         "**今日：验证手动刷新**",
         "",
         "**日常**",
         "",
-        "- [x] 旧的日常",
-        "  - [/] 旧的子项目",
+        "- [x] 起床任务",
+        "- [ ] 读三篇论文",
         "",
         "**主线**",
         "",
@@ -709,7 +900,13 @@ test("refreshCurrentDailySection only allows one manual refresh per Beijing day"
   const app = {
     vault: {
       getAbstractFileByPath(path) {
-        return fileContents.has(path) ? { path } : null;
+        return fileContents.has(path) || folders.has(path) ? { path } : null;
+      },
+      async create(path, content) {
+        fileContents.set(path, content);
+      },
+      async createFolder(path) {
+        folders.add(path);
       },
       async read(file) {
         return fileContents.get(file.path);
@@ -727,7 +924,6 @@ test("refreshCurrentDailySection only allows one manual refresh per Beijing day"
     "",
     "**日常**",
     "",
-    "- [ ] 起床任务",
     "- [ ] 读三篇论文",
     "",
     "**主线**",
@@ -744,24 +940,46 @@ test("refreshCurrentDailySection only allows one manual refresh per Beijing day"
   assert.equal(await refreshCurrentDailySection(app, pluginData, async (data) => {
     saveDataCalls.push({ ...data });
   }), true);
-  assert.equal(fileContents.get("tracks/current.md"), expectedCurrent);
-  assert.equal(pluginData.lastCurrentDailySyncDate, getTodayDateStr());
-  assert.deepEqual(saveDataCalls, [{ lastCurrentDailySyncDate: getTodayDateStr() }]);
+  assert.equal(fileContents.get("01-tracks/current.md"), expectedCurrent);
+  assert.deepEqual(parseCurrentDailyCacheEntries(fileContents.get(cachePath)), {
+    "日常": ["- [x] 起床任务"],
+    "主线": [
+      "- [x] 已完成主线",
+      [
+        "- [/] 保留中的主线",
+        "  - [x] 已完成子项目",
+      ].join("\n"),
+    ],
+    "支线": [],
+  });
+  assert.deepEqual(pluginData, {});
+  assert.deepEqual(saveDataCalls, []);
   assert.equal(await refreshCurrentDailySection(app, pluginData, async (data) => {
     saveDataCalls.push({ ...data });
-  }), false);
-  assert.equal(fileContents.get("tracks/current.md"), expectedCurrent);
-  assert.deepEqual(saveDataCalls, [{ lastCurrentDailySyncDate: getTodayDateStr() }]);
+  }), true);
+  assert.equal(fileContents.get("01-tracks/current.md"), expectedCurrent);
+  assert.deepEqual(parseCurrentDailyCacheEntries(fileContents.get(cachePath)), {
+    "日常": ["- [x] 起床任务"],
+    "主线": [
+      "- [x] 已完成主线",
+      [
+        "- [/] 保留中的主线",
+        "  - [x] 已完成子项目",
+      ].join("\n"),
+    ],
+    "支线": [],
+  });
+  assert.deepEqual(saveDataCalls, []);
 });
 
-test("isCurrentTracksFile only matches tracks/current.md", () => {
-  assert.equal(isCurrentTracksFile({ path: "tracks/current.md" }), true);
-  assert.equal(isCurrentTracksFile({ path: "tracks/tracks.md" }), false);
+test("isCurrentTracksFile only matches 01-tracks/current.md", () => {
+  assert.equal(isCurrentTracksFile({ path: "01-tracks/current.md" }), true);
+  assert.equal(isCurrentTracksFile({ path: "01-tracks/tracks.md" }), false);
   assert.equal(isCurrentTracksFile(null), false);
 });
 
-test("syncDailyRefreshHeaderActions adds a header action only for tracks/current.md and removes stale ones", () => {
-  const currentLeaf = createMockLeaf("tracks/current.md");
+test("syncDailyRefreshHeaderActions adds a header action only for 01-tracks/current.md and removes stale ones", () => {
+  const currentLeaf = createMockLeaf("01-tracks/current.md");
   const otherLeaf = createMockLeaf("notes/other.md");
   const plugin = {
     app: {
@@ -794,7 +1012,7 @@ test("syncDailyRefreshHeaderActions adds a header action only for tracks/current
 });
 
 test("addDailyRefreshHeaderAction reuses the existing connected action and removeDailyRefreshHeaderAction detaches it", () => {
-  const leaf = createMockLeaf("tracks/current.md");
+  const leaf = createMockLeaf("01-tracks/current.md");
   const plugin = {
     app: {},
     data: {},

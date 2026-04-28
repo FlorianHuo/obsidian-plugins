@@ -54,7 +54,9 @@ npm run dev
 - Fix `Mod+L` / done-sorting behavior when Obsidian runs `task-flow` through the inline task-sort fallback
 - Starting a child task now marks each ancestor task as in progress before sorting the affected branches
 - Completing a parent task now marks all descendant tasks as done before sorting the branch
-- Add a manual `tracks/current.md` header action that can run once per Beijing day: rebuild `日常` from top-level Rhythms/Daily tasks, clear all Daily subtasks/statuses, and prune completed `[x]` items out of `主线 / 支线`
+- Add a repeatable `01-tracks/current.md` refresh action with the existing header icon and default `Alt+C` command: cache completed items to `01-tracks/cache/YYYY-MM-DD.md`, keep completed `日常` items out of `current.md` for the rest of the day, and prune completed `[x]` items out of `主线 / 支线`
+- Add `Preview current day settlement`, a read-only command that lists completed top-level `主线` items from today's cache without modifying `shop.md`
+- Add `Settle current day`, a manual command that records completed top-level `主线` items in `04-governance/shop.md` and updates the shop balance
 - `Mod+L` now inserts a new unchecked task on blank lines, and on an empty unchecked task line it clears the line back to blank
 - `Mod+/` now places a newly in-progress task below existing `[/]` siblings and above unchecked `[ ]` siblings instead of forcing it to the very top
 - `Mod+L` moves a newly completed task to the top of the current completed group, preserving the relative order of older `[x]` siblings

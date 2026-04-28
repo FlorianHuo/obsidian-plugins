@@ -497,11 +497,14 @@ const TASK_ITEM_RE = /^(\s*(?:[-*+]|\d+\.)\s+)\[([^\]]?)\](.*)$/;
 const BARE_TASK_RE = /^(\s*)\[([^\]]?)\](.*)$/;
 const LIST_ITEM_RE = /^(\s*(?:[-*+]|\d+\.)\s+)(.*)$/;
 const BLANK_LINE_RE = /^(\s*)$/;
-const CURRENT_TRACKS_FILE_PATH = "tracks/current.md";
-const TRACKS_FILE_PATH = "tracks/tracks.md";
+const CURRENT_TRACKS_FILE_PATH = "01-tracks/current.md";
+const TRACKS_FILE_PATH = "01-tracks/tracks.md";
+const CURRENT_DAILY_CACHE_FOLDER_PATH = "01-tracks/cache";
+const SHOP_FILE_PATH = "04-governance/shop.md";
 const DAILY_TIME_ZONE = "Asia/Shanghai";
 const DAILY_REFRESH_ICON = "refresh-cw";
 const DAILY_HEADER_ACTION_CLASS = "task-flow-refresh-current-daily";
+const CURRENT_DAILY_CACHE_SECTION_NAMES = ["日常", "主线", "支线"];
 
 function preserveTrailingNewlines(sourceText, updatedText) {
   const sourceTrailingNewlineCount = sourceText.match(/\n*$/)?.[0].length ?? 0;
@@ -532,8 +535,8 @@ function getTodayDateStr(timeZone = DAILY_TIME_ZONE, now = new Date()) {
   return `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
 }
 
-function shouldRefreshCurrentDailySection(lastRefreshDate, today = getTodayDateStr()) {
-  return lastRefreshDate !== today;
+function getCurrentDailyCacheFilePath(date = getTodayDateStr()) {
+  return `${CURRENT_DAILY_CACHE_FOLDER_PATH}/${date}.md`;
 }
 
 function normalizeDailyRhythmTask(line) {
@@ -673,9 +676,17 @@ function cleanCarryoverSection(lines, headingText, nextHeadingText = null) {
   return replaceCurrentSectionBody(lines, sectionRange, cleanedBody);
 }
 
-function buildCurrentRefreshLines(currentContent, dailyTasks) {
+function normalizeTaskTextKey(text) {
+  return text.trim();
+}
+
+function buildCurrentRefreshLines(currentContent, dailyTasks, options = {}) {
   const lines = currentContent.split("\n");
-  const withDailyReset = replaceCurrentDailySectionLines(lines, dailyTasks);
+  const excludedDailyTasks = options.excludedDailyTasks || new Set();
+  const visibleDailyTasks = dailyTasks.filter(
+    (task) => !excludedDailyTasks.has(normalizeTaskTextKey(task))
+  );
+  const withDailyReset = replaceCurrentDailySectionLines(lines, visibleDailyTasks);
   if (!withDailyReset) return null;
 
   const withMainCleaned = cleanCarryoverSection(
@@ -691,18 +702,432 @@ function buildCurrentRefreshLines(currentContent, dailyTasks) {
   return withSideCleaned;
 }
 
-function buildRefreshedCurrentContent(currentContent, tracksContent) {
+function buildRefreshedCurrentContent(currentContent, tracksContent, options = {}) {
   const dailyTasks = extractRhythmsDailyTasks(tracksContent);
   if (dailyTasks === null) {
     return null;
   }
 
-  const refreshedLines = buildCurrentRefreshLines(currentContent, dailyTasks);
+  const refreshedLines = buildCurrentRefreshLines(currentContent, dailyTasks, options);
   if (!refreshedLines) {
     return null;
   }
 
   return preserveTrailingNewlines(currentContent, refreshedLines.join("\n"));
+}
+
+function trimBlankLines(lines) {
+  let start = 0;
+  let end = lines.length;
+
+  while (start < end && lines[start].trim() === "") start += 1;
+  while (end > start && lines[end - 1].trim() === "") end -= 1;
+
+  return lines.slice(start, end);
+}
+
+function buildTaskTree(content) {
+  const lines = content.split("\n");
+  const root = { children: [], indentLength: -1 };
+  const stack = [root];
+  const nodes = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const taskMatch = matchTaskLine(lines[index]);
+    if (!taskMatch) continue;
+
+    const indentLength = taskMatch[1].length;
+    while (
+      stack.length > 1 &&
+      stack[stack.length - 1].indentLength >= indentLength
+    ) {
+      stack.pop();
+    }
+
+    const parent = stack[stack.length - 1];
+    const node = {
+      children: [],
+      endIndex: index,
+      indentLength,
+      isCompleted: isCompletedTaskMarker(taskMatch[2]),
+      line: lines[index],
+      parent,
+      startIndex: index,
+    };
+
+    parent.children.push(node);
+    nodes.push(node);
+    stack.push(node);
+  }
+
+  for (let index = 0; index < nodes.length; index += 1) {
+    const node = nodes[index];
+    let endIndex = lines.length - 1;
+
+    for (let nextIndex = index + 1; nextIndex < nodes.length; nextIndex += 1) {
+      if (nodes[nextIndex].indentLength <= node.indentLength) {
+        endIndex = nodes[nextIndex].startIndex - 1;
+        break;
+      }
+    }
+
+    while (endIndex > node.startIndex && lines[endIndex].trim() === "") {
+      endIndex -= 1;
+    }
+
+    node.endIndex = endIndex;
+  }
+
+  return { lines, roots: root.children };
+}
+
+function getNodeAncestorLines(node) {
+  const ancestors = [];
+  let current = node.parent;
+
+  while (current && typeof current.line === "string") {
+    ancestors.unshift(current.line);
+    current = current.parent;
+  }
+
+  return ancestors;
+}
+
+function renderCompletedNodeCacheBlock(lines, node) {
+  return [
+    ...getNodeAncestorLines(node),
+    ...lines.slice(node.startIndex, node.endIndex + 1),
+  ].join("\n");
+}
+
+function collectCompletedTaskCacheBlocksFromNodes(lines, nodes, blocks = []) {
+  for (const node of nodes) {
+    if (node.isCompleted) {
+      blocks.push(renderCompletedNodeCacheBlock(lines, node));
+      continue;
+    }
+
+    collectCompletedTaskCacheBlocksFromNodes(lines, node.children, blocks);
+  }
+
+  return blocks;
+}
+
+function collectCompletedTaskCacheBlocks(content) {
+  const { lines, roots } = buildTaskTree(content);
+  return collectCompletedTaskCacheBlocksFromNodes(lines, roots).filter(
+    (block) => block.trim() !== ""
+  );
+}
+
+function createEmptyCurrentDailyCacheEntries() {
+  return Object.fromEntries(
+    CURRENT_DAILY_CACHE_SECTION_NAMES.map((sectionName) => [sectionName, []])
+  );
+}
+
+function extractCurrentRefreshCacheEntries(currentContent) {
+  const lines = currentContent.split("\n");
+  const entries = createEmptyCurrentDailyCacheEntries();
+  const sections = [
+    { cacheSection: "日常", heading: "**日常**", nextHeading: "**主线**" },
+    { cacheSection: "主线", heading: "**主线**", nextHeading: "**支线**" },
+    { cacheSection: "支线", heading: "**支线**", nextHeading: null },
+  ];
+
+  for (const section of sections) {
+    const range = findCurrentSectionRange(lines, section.heading, section.nextHeading);
+    if (!range) continue;
+
+    entries[section.cacheSection] = collectCompletedTaskCacheBlocks(
+      getSectionBodyText(lines, range)
+    );
+  }
+
+  return entries;
+}
+
+function hasCurrentDailyCacheEntries(entries) {
+  return CURRENT_DAILY_CACHE_SECTION_NAMES.some(
+    (sectionName) => (entries[sectionName] || []).length > 0
+  );
+}
+
+function findCacheSectionRange(lines, sectionName) {
+  const headingText = `## ${sectionName}`;
+  const headingIndex = lines.findIndex((line) => line.trim() === headingText);
+  if (headingIndex === -1) return null;
+
+  const nextHeadingIndex = lines.findIndex(
+    (line, index) => index > headingIndex && /^##\s+/.test(line.trim())
+  );
+
+  return {
+    bodyStartIndex: headingIndex + 1,
+    headingIndex,
+    nextHeadingIndex: nextHeadingIndex === -1 ? lines.length : nextHeadingIndex,
+  };
+}
+
+function splitCacheBlocks(lines) {
+  const sectionLines = trimBlankLines(lines);
+  if (sectionLines.length === 0) {
+    return [];
+  }
+
+  const { lines: taskLines, roots } = buildTaskTree(sectionLines.join("\n"));
+
+  return roots.map((root) =>
+    taskLines.slice(root.startIndex, root.endIndex + 1).join("\n")
+  );
+}
+
+function parseCurrentDailyCacheEntries(cacheContent) {
+  const entries = createEmptyCurrentDailyCacheEntries();
+  if (!cacheContent || cacheContent.trim() === "") {
+    return entries;
+  }
+
+  const lines = cacheContent.split("\n");
+  for (const sectionName of CURRENT_DAILY_CACHE_SECTION_NAMES) {
+    const range = findCacheSectionRange(lines, sectionName);
+    if (!range) continue;
+
+    entries[sectionName] = splitCacheBlocks(
+      lines.slice(range.bodyStartIndex, range.nextHeadingIndex)
+    );
+  }
+
+  return entries;
+}
+
+function normalizeCacheBlock(block) {
+  return trimBlankLines(block.split("\n")).join("\n");
+}
+
+function mergeCurrentDailyCacheEntries(existingEntries, incomingEntries) {
+  const mergedEntries = createEmptyCurrentDailyCacheEntries();
+
+  for (const sectionName of CURRENT_DAILY_CACHE_SECTION_NAMES) {
+    const seen = new Set();
+    for (const block of [
+      ...(existingEntries[sectionName] || []),
+      ...(incomingEntries[sectionName] || []),
+    ]) {
+      const normalizedBlock = normalizeCacheBlock(block);
+      if (normalizedBlock === "" || seen.has(normalizedBlock)) continue;
+
+      seen.add(normalizedBlock);
+      mergedEntries[sectionName].push(normalizedBlock);
+    }
+  }
+
+  return mergedEntries;
+}
+
+function renderCurrentDailyCacheContent(date, entries) {
+  const lines = [`# ${date}`, ""];
+
+  for (let index = 0; index < CURRENT_DAILY_CACHE_SECTION_NAMES.length; index += 1) {
+    const sectionName = CURRENT_DAILY_CACHE_SECTION_NAMES[index];
+    if (index > 0) {
+      lines.push("");
+    }
+
+    lines.push(`## ${sectionName}`);
+    for (const block of entries[sectionName] || []) {
+      if (lines[lines.length - 1] === `## ${sectionName}`) {
+        lines.push("");
+      }
+      lines.push(...normalizeCacheBlock(block).split("\n"));
+    }
+  }
+
+  return `${trimBlankLines(lines).join("\n")}\n`;
+}
+
+function mergeCurrentDailyCacheContent(existingContent, date, incomingEntries) {
+  const existingEntries = parseCurrentDailyCacheEntries(existingContent);
+  const mergedEntries = mergeCurrentDailyCacheEntries(
+    existingEntries,
+    incomingEntries
+  );
+
+  return renderCurrentDailyCacheContent(date, mergedEntries);
+}
+
+function extractCachedCompletedDailyTaskTexts(cacheContent) {
+  const entries = parseCurrentDailyCacheEntries(cacheContent);
+  const completedTexts = new Set();
+
+  for (const block of entries["日常"] || []) {
+    const firstLine = block.split("\n").find((line) => matchTaskLine(line));
+    const taskMatch = firstLine ? matchTaskLine(firstLine) : null;
+    if (!taskMatch || !isCompletedTaskMarker(taskMatch[2])) continue;
+
+    const taskText = normalizeDailyRhythmTask(firstLine);
+    if (taskText !== null) {
+      completedTexts.add(normalizeTaskTextKey(taskText));
+    }
+  }
+
+  return completedTexts;
+}
+
+function extractTaskTextFromTaskLine(line) {
+  const taskMatch = line.match(/^\s*-\s*\[[^\]]?\]\s*(.*)$/);
+  if (!taskMatch) return null;
+
+  const taskText = taskMatch[1].trim();
+  return taskText === "" ? null : taskText;
+}
+
+function extractCompletedMainlineSettlementItems(cacheContent) {
+  const entries = parseCurrentDailyCacheEntries(cacheContent);
+  const items = [];
+  const seen = new Set();
+
+  for (const block of entries["主线"] || []) {
+    const firstLine = block.split("\n").find((line) => line.trim() !== "");
+    const taskMatch = firstLine ? matchTaskLine(firstLine) : null;
+    if (!taskMatch || taskMatch[1] !== "" || !isCompletedTaskMarker(taskMatch[2])) {
+      continue;
+    }
+
+    const title = extractTaskTextFromTaskLine(firstLine);
+    if (!title || seen.has(title)) continue;
+
+    seen.add(title);
+    items.push({
+      points: 3,
+      title,
+    });
+  }
+
+  return items;
+}
+
+function renderCurrentDaySettlementPreview(date, items) {
+  if (items.length === 0) {
+    return `Settle ${date}: no completed mainline items.`;
+  }
+
+  const lines = [
+    `Settle ${date}: ${items.length} completed mainline item(s), +${items.length * 3} points.`,
+  ];
+
+  for (const item of items) {
+    lines.push(`+${item.points} 完成主线：${item.title}`);
+  }
+
+  return lines.join("\n");
+}
+
+function parseShopBalanceLine(line) {
+  const match = line.match(/^\*\*余额：(-?\d+)\s*\|\s*当前连续：(\d+)\s*天\s*\|\s*最长记录：(\d+)\s*天\*\*$/);
+  if (!match) return null;
+
+  return {
+    balance: Number(match[1]),
+    currentStreak: Number(match[2]),
+    longestStreak: Number(match[3]),
+  };
+}
+
+function renderShopBalanceLine(balanceInfo) {
+  return `**余额：${balanceInfo.balance} | 当前连续：${balanceInfo.currentStreak} 天 | 最长记录：${balanceInfo.longestStreak} 天**`;
+}
+
+function findShopBalanceLineIndex(lines) {
+  return lines.findIndex((line) => parseShopBalanceLine(line) !== null);
+}
+
+function findShopLedgerInsertIndex(lines) {
+  const ledgerHeadingIndex = lines.findIndex((line) => line.trim() === "**流水**");
+  if (ledgerHeadingIndex === -1) return -1;
+
+  const actionHeadingIndex = lines.findIndex(
+    (line, index) =>
+      index > ledgerHeadingIndex &&
+      /^\*\*.+\*\*$/.test(line.trim()) &&
+      line.trim() !== "**流水**"
+  );
+
+  if (actionHeadingIndex === -1) {
+    return ledgerHeadingIndex + 1;
+  }
+
+  return actionHeadingIndex + 1;
+}
+
+function getSettledMainlineTitlesFromShopContent(shopContent) {
+  const titles = new Set();
+  const lineRe = /^\d{4}-\d{2}-\d{2}\s+\|\s+[+-]?\d+\s+\|\s+完成主线：(.+?)\s+\|\s+余额\s+-?\d+\s*$/;
+
+  for (const line of shopContent.split("\n")) {
+    const match = line.match(lineRe);
+    if (match) {
+      titles.add(match[1].trim());
+    }
+  }
+
+  return titles;
+}
+
+function filterUnsettledSettlementItems(items, shopContent) {
+  const settledTitles = getSettledMainlineTitlesFromShopContent(shopContent);
+  return items.filter((item) => !settledTitles.has(item.title));
+}
+
+function applyCurrentDaySettlementToShopContent(shopContent, date, items) {
+  if (items.length === 0) {
+    return {
+      changed: false,
+      content: shopContent,
+      settledItems: [],
+    };
+  }
+
+  const lines = shopContent.split("\n");
+  const balanceLineIndex = findShopBalanceLineIndex(lines);
+  const insertIndex = findShopLedgerInsertIndex(lines);
+  if (balanceLineIndex === -1 || insertIndex === -1) {
+    return null;
+  }
+
+  const balanceInfo = parseShopBalanceLine(lines[balanceLineIndex]);
+  const settledItems = filterUnsettledSettlementItems(items, shopContent);
+  if (settledItems.length === 0) {
+    return {
+      changed: false,
+      content: shopContent,
+      settledItems: [],
+    };
+  }
+
+  let runningBalance = balanceInfo.balance;
+  const ledgerLines = [];
+
+  for (const item of settledItems) {
+    runningBalance += item.points;
+    ledgerLines.push(
+      `${date} | +${item.points} | 完成主线：${item.title} | 余额 ${runningBalance}`
+    );
+  }
+
+  const updatedBalanceInfo = {
+    ...balanceInfo,
+    balance: runningBalance,
+  };
+
+  lines[balanceLineIndex] = renderShopBalanceLine(updatedBalanceInfo);
+  lines.splice(insertIndex, 0, ...ledgerLines);
+
+  return {
+    changed: true,
+    content: lines.join("\n"),
+    settledItems,
+  };
 }
 
 function createMarkerReplacement(prefix, oldMarker, suffix, statusChar) {
@@ -1615,17 +2040,52 @@ async function sortCurrentFile(app, silent = false) {
   return false;
 }
 
+async function readVaultFileIfExists(app, path) {
+  const file = app.vault.getAbstractFileByPath(path);
+  if (!file) return null;
+
+  return app.vault.read(file);
+}
+
+async function ensureVaultFolder(app, folderPath) {
+  if (app.vault.getAbstractFileByPath(folderPath)) {
+    return;
+  }
+
+  if (typeof app.vault.createFolder === "function") {
+    await app.vault.createFolder(folderPath);
+  }
+}
+
+async function writeCurrentDailyCache(app, date, incomingEntries) {
+  if (!hasCurrentDailyCacheEntries(incomingEntries)) {
+    return false;
+  }
+
+  const cachePath = getCurrentDailyCacheFilePath(date);
+  await ensureVaultFolder(app, CURRENT_DAILY_CACHE_FOLDER_PATH);
+
+  const cacheFile = app.vault.getAbstractFileByPath(cachePath);
+  if (cacheFile) {
+    await app.vault.process(cacheFile, (data) =>
+      mergeCurrentDailyCacheContent(data, date, incomingEntries)
+    );
+    return true;
+  }
+
+  await app.vault.create(
+    cachePath,
+    mergeCurrentDailyCacheContent(null, date, incomingEntries)
+  );
+  return true;
+}
+
 async function refreshCurrentDailySection(
   app,
   pluginData = {},
   saveData = async () => {}
 ) {
   const today = getTodayDateStr();
-  if (!shouldRefreshCurrentDailySection(pluginData.lastCurrentDailySyncDate, today)) {
-    new NoticeClass("Daily refresh is only available once per Beijing day.");
-    return false;
-  }
-
   const tracksFile = app.vault.getAbstractFileByPath(TRACKS_FILE_PATH);
   const currentFile = app.vault.getAbstractFileByPath(CURRENT_TRACKS_FILE_PATH);
 
@@ -1636,18 +2096,33 @@ async function refreshCurrentDailySection(
 
   const tracksContent = await app.vault.read(tracksFile);
   const currentContent = await app.vault.read(currentFile);
-  const preview = buildRefreshedCurrentContent(currentContent, tracksContent);
+  const cacheEntries = extractCurrentRefreshCacheEntries(currentContent);
+  const cachePath = getCurrentDailyCacheFilePath(today);
+  const existingCacheContent = await readVaultFileIfExists(app, cachePath);
+  const mergedCacheContent = mergeCurrentDailyCacheContent(
+    existingCacheContent,
+    today,
+    cacheEntries
+  );
+  const excludedDailyTasks = extractCachedCompletedDailyTaskTexts(mergedCacheContent);
+  const preview = buildRefreshedCurrentContent(currentContent, tracksContent, {
+    excludedDailyTasks,
+  });
 
   if (preview === null) {
     new NoticeClass("Daily refresh needs a valid Rhythms/Daily block and current.md sections.");
     return false;
   }
 
+  await writeCurrentDailyCache(app, today, cacheEntries);
+
   let replaced = false;
   let failed = false;
 
   await app.vault.process(currentFile, (data) => {
-    const updated = buildRefreshedCurrentContent(data, tracksContent);
+    const updated = buildRefreshedCurrentContent(data, tracksContent, {
+      excludedDailyTasks,
+    });
     if (updated === null) {
       failed = true;
       return data;
@@ -1662,10 +2137,71 @@ async function refreshCurrentDailySection(
     return false;
   }
 
-  pluginData.lastCurrentDailySyncDate = today;
-  await saveData(pluginData);
-
   new NoticeClass("current.md daily section refreshed.");
+  return true;
+}
+
+async function previewCurrentDaySettlement(app, date = getTodayDateStr()) {
+  const cachePath = getCurrentDailyCacheFilePath(date);
+  const cacheContent = await readVaultFileIfExists(app, cachePath);
+  if (cacheContent === null) {
+    new NoticeClass(`No current.md cache found for ${date}.`);
+    return null;
+  }
+
+  const items = extractCompletedMainlineSettlementItems(cacheContent);
+  const preview = renderCurrentDaySettlementPreview(date, items);
+  new NoticeClass(preview);
+  return {
+    date,
+    items,
+    preview,
+  };
+}
+
+async function settleCurrentDay(app, date = getTodayDateStr()) {
+  const cachePath = getCurrentDailyCacheFilePath(date);
+  const cacheContent = await readVaultFileIfExists(app, cachePath);
+  if (cacheContent === null) {
+    new NoticeClass(`No current.md cache found for ${date}.`);
+    return false;
+  }
+
+  const items = extractCompletedMainlineSettlementItems(cacheContent);
+  if (items.length === 0) {
+    new NoticeClass(`Settle ${date}: no completed mainline items.`);
+    return false;
+  }
+
+  const shopFile = app.vault.getAbstractFileByPath(SHOP_FILE_PATH);
+  if (!shopFile) {
+    new NoticeClass("Missing 04-governance/shop.md for settlement.");
+    return false;
+  }
+
+  let result = null;
+  await app.vault.process(shopFile, (data) => {
+    result = applyCurrentDaySettlementToShopContent(data, date, items);
+    if (result === null || !result.changed) {
+      return data;
+    }
+
+    return result.content;
+  });
+
+  if (result === null) {
+    new NoticeClass("Settlement failed: shop.md format was not recognized.");
+    return false;
+  }
+
+  if (!result.changed) {
+    new NoticeClass(`Settle ${date}: no new completed mainline items.`);
+    return false;
+  }
+
+  new NoticeClass(
+    `Settle ${date}: recorded ${result.settledItems.length} mainline item(s), +${result.settledItems.length * 3} points.`
+  );
   return true;
 }
 
@@ -1779,6 +2315,14 @@ function registerDailyRefreshHeaderActions(plugin) {
   });
 }
 
+function runCurrentDailyRefresh(plugin) {
+  return refreshCurrentDailySection(
+    plugin.app,
+    plugin.data,
+    (data) => plugin.saveData(data)
+  );
+}
+
 class TaskStatusShortcutsPlugin extends PluginClass {
   async onload() {
     this.data = (await this.loadData()) || {};
@@ -1824,6 +2368,30 @@ class TaskStatusShortcutsPlugin extends PluginClass {
       name: "Sort tasks in current file",
       callback: () => void sortCurrentFile(this.app),
     });
+
+    this.addCommand({
+      id: "refresh-current-daily-section",
+      name: "Refresh current.md daily section",
+      hotkeys: [
+        {
+          modifiers: ["Alt"],
+          key: "C",
+        },
+      ],
+      callback: () => void runCurrentDailyRefresh(this),
+    });
+
+    this.addCommand({
+      id: "preview-current-day-settlement",
+      name: "Preview current day settlement",
+      callback: () => void previewCurrentDaySettlement(this.app),
+    });
+
+    this.addCommand({
+      id: "settle-current-day",
+      name: "Settle current day",
+      callback: () => void settleCurrentDay(this.app),
+    });
   }
 }
 
@@ -1831,6 +2399,7 @@ module.exports = TaskStatusShortcutsPlugin;
 module.exports.default = TaskStatusShortcutsPlugin;
 module.exports.applyStatusToLine = applyStatusToLine;
 module.exports.applyTaskStatusCommandToEditor = applyTaskStatusCommandToEditor;
+module.exports.applyCurrentDaySettlementToShopContent = applyCurrentDaySettlementToShopContent;
 module.exports.buildTaskSortExtension = buildTaskSortExtension;
 module.exports.createInlineTaskSortHelpers = createInlineTaskSortHelpers;
 module.exports.ensureEditableMarkdownEditor = ensureEditableMarkdownEditor;
@@ -1838,19 +2407,30 @@ module.exports.getActiveMarkdownEditor = getActiveMarkdownEditor;
 module.exports.getActiveMarkdownView = getActiveMarkdownView;
 module.exports.runTaskStatusCommand = runTaskStatusCommand;
 module.exports.buildRefreshedCurrentContent = buildRefreshedCurrentContent;
+module.exports.collectCompletedTaskCacheBlocks = collectCompletedTaskCacheBlocks;
 module.exports.extractRhythmsDailyTasks = extractRhythmsDailyTasks;
+module.exports.extractCachedCompletedDailyTaskTexts = extractCachedCompletedDailyTaskTexts;
+module.exports.extractCompletedMainlineSettlementItems = extractCompletedMainlineSettlementItems;
+module.exports.extractCurrentRefreshCacheEntries = extractCurrentRefreshCacheEntries;
 module.exports.addDailyRefreshHeaderAction = addDailyRefreshHeaderAction;
 module.exports.completeDescendantTasksInLineArray = completeDescendantTasksInLineArray;
+module.exports.getCurrentDailyCacheFilePath = getCurrentDailyCacheFilePath;
 module.exports.getMarkdownLeaves = getMarkdownLeaves;
 module.exports.getTodayDateStr = getTodayDateStr;
 module.exports.isCurrentTracksFile = isCurrentTracksFile;
 module.exports.markAncestorTasksInLineArray = markAncestorTasksInLineArray;
+module.exports.mergeCurrentDailyCacheContent = mergeCurrentDailyCacheContent;
+module.exports.parseCurrentDailyCacheEntries = parseCurrentDailyCacheEntries;
+module.exports.previewCurrentDaySettlement = previewCurrentDaySettlement;
 module.exports.registerDailyRefreshHeaderActions = registerDailyRefreshHeaderActions;
 module.exports.removeDailyRefreshHeaderAction = removeDailyRefreshHeaderAction;
 module.exports.refreshCurrentDailySection = refreshCurrentDailySection;
+module.exports.renderCurrentDaySettlementPreview = renderCurrentDaySettlementPreview;
+module.exports.renderCurrentDailyCacheContent = renderCurrentDailyCacheContent;
 module.exports.replaceCurrentDailySection = replaceCurrentDailySection;
+module.exports.runCurrentDailyRefresh = runCurrentDailyRefresh;
 module.exports.setTaskStatus = setTaskStatus;
-module.exports.shouldRefreshCurrentDailySection = shouldRefreshCurrentDailySection;
+module.exports.settleCurrentDay = settleCurrentDay;
 module.exports.syncDailyRefreshHeaderActions = syncDailyRefreshHeaderActions;
 module.exports.sortCurrentFile = sortCurrentFile;
 module.exports.sortEditorTaskRegions = sortEditorTaskRegions;
