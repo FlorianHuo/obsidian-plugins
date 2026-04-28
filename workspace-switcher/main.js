@@ -10,6 +10,52 @@ const obsidian = require("obsidian");
 
 const DAILY_TIME_ZONE = "Asia/Shanghai";
 const DAILY_ROLLOVER_CHECK_INTERVAL_MS = 60 * 1000;
+const DEFAULT_SETTINGS = {
+  dailyNoteFolder: "journal",
+  pathRewriteRules: "",
+};
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeDailyNoteFolder(folder) {
+  const normalized = String(folder || "")
+    .trim()
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+  return normalized || DEFAULT_SETTINGS.dailyNoteFolder;
+}
+
+function normalizeSettings(settings = {}) {
+  settings = settings || {};
+  return {
+    dailyNoteFolder: normalizeDailyNoteFolder(settings.dailyNoteFolder),
+    pathRewriteRules: String(settings.pathRewriteRules || ""),
+  };
+}
+
+function parsePathRewriteRules(rulesText) {
+  return String(rulesText || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => {
+      const match = /^(?:(exact|prefix)\s*:)?\s*(.+?)\s*(?:=>|->)\s*(.+)$/i.exec(line);
+      if (!match) return null;
+
+      const from = match[2].trim();
+      const to = match[3].trim();
+      if (!from) return null;
+
+      return {
+        mode: (match[1] || (from.endsWith("/") ? "prefix" : "exact")).toLowerCase(),
+        from,
+        to,
+      };
+    })
+    .filter(Boolean);
+}
 
 // Modal for selecting a saved workspace from a fuzzy-search list
 class WorkspacePickerModal extends obsidian.FuzzySuggestModal {
@@ -136,13 +182,63 @@ class WorkspaceQuickSwitchModal extends obsidian.Modal {
   }
 }
 
+class WorkspaceSwitcherSettingTab extends obsidian.PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  display() {
+    const { contentEl } = this;
+    contentEl.empty();
+
+    contentEl.createEl("h2", { text: "Workspace Switcher" });
+
+    new obsidian.Setting(contentEl)
+      .setName("Daily note folder")
+      .setDesc("Folder for dated daily notes, for example journal. Do not include a leading or trailing slash.")
+      .addText((text) => {
+        text
+          .setPlaceholder(DEFAULT_SETTINGS.dailyNoteFolder)
+          .setValue(this.plugin.settings.dailyNoteFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.dailyNoteFolder = normalizeDailyNoteFolder(value);
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new obsidian.Setting(contentEl)
+      .setName("Path rewrite rules")
+      .setDesc("Optional local migration rules, one per line. Use 'prefix: old/ -> new/' or 'exact: old.md -> new.md'.")
+      .addTextArea((text) => {
+        text
+          .setPlaceholder("prefix: old-folder/ -> new-folder/\nexact: old-file.md -> new-file.md")
+          .setValue(this.plugin.settings.pathRewriteRules)
+          .onChange(async (value) => {
+            this.plugin.settings.pathRewriteRules = value;
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.rows = 8;
+        text.inputEl.style.width = "100%";
+      });
+  }
+}
+
 class WorkspaceSwitcherPlugin extends obsidian.Plugin {
+  constructor(app) {
+    super(app);
+    this.settings = normalizeSettings();
+  }
+
   async onload() {
     // Load persisted data for saved workspaces and rollover tracking.
     this.data = (await this.loadData()) || {};
     if (!this.data.workspaces) this.data.workspaces = {};
+    this.settings = normalizeSettings(this.data.settings);
+    this.data.settings = this.settings;
     this.lastSeenDate = this.getTodayDateStr();
     this.isDateRefreshInFlight = false;
+    this.addSettingTab(new WorkspaceSwitcherSettingTab(this.app, this));
 
     // On startup: update stale journal paths only.
     this.app.workspace.onLayoutReady(() => void this.onStartup());
@@ -189,21 +285,33 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     await this.syncDailyState();
   }
 
+  async saveSettings() {
+    this.settings = normalizeSettings(this.settings);
+    this.data.settings = this.settings;
+    await this.saveData(this.data);
+  }
+
   async syncDailyState() {
     const today = this.getTodayDateStr();
-    const todayPath = `journal/${today}.md`;
+    const todayPath = this.getDailyNotePath(today);
     const layout = this.app.workspace.getLayout();
     let changed = false;
 
-    // Check if any leaf has a stale journal path
+    // Check if any leaf has a legacy vault path or stale journal path.
     const check = (node) => {
       if (!node) return;
       if (node.type === "leaf" && node.state && node.state.state &&
-          typeof node.state.state.file === "string" &&
-          /^journal\/\d{4}-\d{2}-\d{2}\.md$/.test(node.state.state.file) &&
-          node.state.state.file !== todayPath) {
-        node.state.state.file = todayPath;
-        changed = true;
+          typeof node.state.state.file === "string") {
+        const normalizedPath = this.normalizeVaultPath(node.state.state.file);
+        if (normalizedPath !== node.state.state.file) {
+          node.state.state.file = normalizedPath;
+          changed = true;
+        }
+        if (this.isDailyNotePath(node.state.state.file) &&
+            node.state.state.file !== todayPath) {
+          node.state.state.file = todayPath;
+          changed = true;
+        }
       }
       if (Array.isArray(node.children)) {
         for (const child of node.children) check(child);
@@ -253,6 +361,19 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     }
 
     return `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+  }
+
+  getDailyNoteFolder() {
+    return normalizeDailyNoteFolder(this.settings && this.settings.dailyNoteFolder);
+  }
+
+  getDailyNotePath(date) {
+    return `${this.getDailyNoteFolder()}/${date}.md`;
+  }
+
+  isDailyNotePath(path) {
+    const re = new RegExp(`^${escapeRegExp(this.getDailyNoteFolder())}/\\d{4}-\\d{2}-\\d{2}\\.md$`);
+    return re.test(path);
   }
 
   // Ensure a file exists; create it if missing
@@ -321,8 +442,8 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     // Deep clone to avoid mutating saved data
     const layout = JSON.parse(JSON.stringify(savedLayout));
 
-    // Update any journal/YYYY-MM-DD.md paths to today's date
-    const todayPath = `journal/${this.getTodayDateStr()}.md`;
+    // Update configured path rewrites and roll dated journal tabs to today's note.
+    const todayPath = this.getDailyNotePath(this.getTodayDateStr());
     for (const key of Object.keys(layout)) {
       this.updateJournalPaths(layout[key], todayPath);
     }
@@ -334,13 +455,28 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     new obsidian.Notice(`Workspace "${name}" loaded.`);
   }
 
-  // Recursively walk a layout tree and replace journal date paths with today's
+  // Normalize vault paths through user-configured local rewrite rules.
+  normalizeVaultPath(path) {
+    for (const rule of parsePathRewriteRules(this.settings && this.settings.pathRewriteRules)) {
+      if (rule.mode === "exact" && path === rule.from) {
+        return rule.to;
+      }
+      if (rule.mode === "prefix" && path.startsWith(rule.from)) {
+        return `${rule.to}${path.slice(rule.from.length)}`;
+      }
+    }
+    return path;
+  }
+
+  // Recursively walk a layout tree and replace legacy paths and journal date paths.
   updateJournalPaths(node, todayPath) {
     if (!node) return;
     if (node.type === "leaf" && node.state && node.state.state &&
-        typeof node.state.state.file === "string" &&
-        /^journal\/\d{4}-\d{2}-\d{2}\.md$/.test(node.state.state.file)) {
-      node.state.state.file = todayPath;
+        typeof node.state.state.file === "string") {
+      node.state.state.file = this.normalizeVaultPath(node.state.state.file);
+      if (this.isDailyNotePath(node.state.state.file)) {
+        node.state.state.file = todayPath;
+      }
     }
     if (Array.isArray(node.children)) {
       for (const child of node.children) {

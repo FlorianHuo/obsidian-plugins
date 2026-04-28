@@ -81,6 +81,7 @@ npm run dev
 
 - Daily journal path updates use `Asia/Shanghai` instead of the computer's local timezone
 - While Obsidian stays open, the plugin checks for a new Beijing day every minute and refreshes stale daily workspace journal paths automatically
+- Daily note folder and optional saved-layout path rewrites are configurable in plugin settings; local vault migrations no longer require hard-coded paths in source
 - Remove the legacy daily content reset code; `workspace-switcher` now only owns workspace and journal-layout behavior
 - Single-tab panes now hide the tab strip without breaking drag-to-split, and the hidden header no longer leaks controls into the view header
 

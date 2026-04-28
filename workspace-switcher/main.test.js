@@ -26,6 +26,14 @@ function loadWorkspaceSwitcherPlugin() {
       registerDomEvent() {}
 
       addCommand() {}
+
+      addSettingTab() {}
+    },
+    PluginSettingTab: class {
+      constructor(app, plugin) {
+        this.app = app;
+        this.plugin = plugin;
+      }
     },
     FuzzySuggestModal: class {
       constructor(app) {
@@ -102,16 +110,29 @@ function createApp(layout) {
   };
 }
 
-test("syncDailyState updates stale journal paths only", async () => {
+test("syncDailyState defaults to generic journal paths without local rewrites", async () => {
   const { WorkspaceSwitcherPlugin } = loadWorkspaceSwitcherPlugin();
   const { app, changedLayouts } = createApp({
     main: {
-      type: "leaf",
-      state: {
-        state: {
-          file: "journal/2026-04-23.md",
+      type: "split",
+      children: [
+        {
+          type: "leaf",
+          state: {
+            state: {
+              file: "journal/2026-04-23.md",
+            },
+          },
         },
-      },
+        {
+          type: "leaf",
+          state: {
+            state: {
+              file: "tracks/current.md",
+            },
+          },
+        },
+      ],
     },
   });
 
@@ -129,25 +150,107 @@ test("syncDailyState updates stale journal paths only", async () => {
   assert.deepEqual(ensureCalls, ["journal/2026-04-24.md"]);
   assert.equal(changedLayouts.length, 1);
   assert.equal(
-    changedLayouts[0].main.state.state.file,
+    changedLayouts[0].main.children[0].state.state.file,
     "journal/2026-04-24.md"
+  );
+  assert.equal(
+    changedLayouts[0].main.children[1].state.state.file,
+    "tracks/current.md"
   );
 });
 
-test("loadSavedWorkspaceByName only updates journal paths", async () => {
-  const { WorkspaceSwitcherPlugin, notices } = loadWorkspaceSwitcherPlugin();
-  const { app, changedLayouts } = createApp({});
-  const plugin = new WorkspaceSwitcherPlugin(app);
-  plugin.data = {
-    workspaces: {
-      Focus: {
-        main: {
+test("syncDailyState applies configured local rewrites before daily rollover", async () => {
+  const { WorkspaceSwitcherPlugin } = loadWorkspaceSwitcherPlugin();
+  const { app, changedLayouts } = createApp({
+    main: {
+      type: "split",
+      children: [
+        {
           type: "leaf",
           state: {
             state: {
               file: "journal/2026-04-23.md",
             },
           },
+        },
+        {
+          type: "leaf",
+          state: {
+            state: {
+              file: "tracks/current.md",
+            },
+          },
+        },
+      ],
+    },
+  });
+
+  const plugin = new WorkspaceSwitcherPlugin(app);
+  plugin.data = {};
+  plugin.settings = {
+    dailyNoteFolder: "Daily",
+    pathRewriteRules: "prefix: journal/ -> Daily/\nprefix: tracks/ -> Projects/",
+  };
+  plugin.getTodayDateStr = () => "2026-04-24";
+
+  const ensureCalls = [];
+  plugin.ensureFile = async (path) => {
+    ensureCalls.push(path);
+  };
+
+  await plugin.syncDailyState();
+
+  assert.deepEqual(ensureCalls, ["Daily/2026-04-24.md"]);
+  assert.equal(changedLayouts.length, 1);
+  assert.equal(
+    changedLayouts[0].main.children[0].state.state.file,
+    "Daily/2026-04-24.md"
+  );
+  assert.equal(
+    changedLayouts[0].main.children[1].state.state.file,
+    "Projects/current.md"
+  );
+});
+
+test("loadSavedWorkspaceByName applies configured rewrites and rolls journal paths", async () => {
+  const { WorkspaceSwitcherPlugin, notices } = loadWorkspaceSwitcherPlugin();
+  const { app, changedLayouts } = createApp({});
+  const plugin = new WorkspaceSwitcherPlugin(app);
+  plugin.settings = {
+    dailyNoteFolder: "Daily",
+    pathRewriteRules: "prefix: journal/ -> Daily/\nprefix: tracks/ -> Projects/\nexact: legacy/shop.md -> Shop.md",
+  };
+  plugin.data = {
+    workspaces: {
+      Focus: {
+        main: {
+          type: "split",
+          children: [
+            {
+              type: "leaf",
+              state: {
+                state: {
+                  file: "journal/2026-04-23.md",
+                },
+              },
+            },
+            {
+              type: "leaf",
+              state: {
+                state: {
+                  file: "legacy/shop.md",
+                },
+              },
+            },
+            {
+              type: "leaf",
+              state: {
+                state: {
+                  file: "tracks/current.md",
+                },
+              },
+            },
+          ],
         },
       },
     },
@@ -161,11 +264,19 @@ test("loadSavedWorkspaceByName only updates journal paths", async () => {
 
   await plugin.loadSavedWorkspaceByName("Focus");
 
-  assert.deepEqual(ensureCalls, ["journal/2026-04-24.md"]);
+  assert.deepEqual(ensureCalls, ["Daily/2026-04-24.md"]);
   assert.equal(changedLayouts.length, 1);
   assert.equal(
-    changedLayouts[0].main.state.state.file,
-    "journal/2026-04-24.md"
+    changedLayouts[0].main.children[0].state.state.file,
+    "Daily/2026-04-24.md"
+  );
+  assert.equal(
+    changedLayouts[0].main.children[1].state.state.file,
+    "Shop.md"
+  );
+  assert.equal(
+    changedLayouts[0].main.children[2].state.state.file,
+    "Projects/current.md"
   );
   assert.deepEqual(notices, ['Workspace "Focus" loaded.']);
 });
