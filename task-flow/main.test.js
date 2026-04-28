@@ -134,6 +134,20 @@ test("applyStatusToLine can set a line to done tasks", () => {
   }
 });
 
+test("applyStatusToLine can set a line to waiting tasks", () => {
+  const cases = [
+    ["- [ ] task", "- [?] task"],
+    ["- [/] task", "- [?] task"],
+    ["- [x] task", "- [?] task"],
+    ["- task", "- [?] task"],
+    ["", "- [?] "],
+  ];
+
+  for (const [input, expected] of cases) {
+    assert.equal(applyStatusToLine(input, "?"), expected);
+  }
+});
+
 test("toggleStatusOnLine turns an in-progress marker back into an unchecked task", () => {
   const cases = [
     ["- [/] task", "- [ ] task"],
@@ -159,6 +173,21 @@ test("toggleStatusOnLine turns a done marker back into an unchecked task", () =>
 
   for (const [input, expected] of cases) {
     assert.equal(toggleStatusOnLine(input, "x"), expected);
+  }
+});
+
+test("toggleStatusOnLine toggles waiting status", () => {
+  const cases = [
+    ["- [?] task", "- [ ] task"],
+    ["1. [?] task", "1. [ ] task"],
+    ["[?] task", "[ ] task"],
+    ["- [ ] task", "- [?] task"],
+    ["- [/] task", "- [?] task"],
+    ["- [x] task", "- [?] task"],
+  ];
+
+  for (const [input, expected] of cases) {
+    assert.equal(toggleStatusOnLine(input, "?"), expected);
   }
 });
 

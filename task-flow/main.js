@@ -2350,6 +2350,20 @@ class TaskStatusShortcutsPlugin extends PluginClass {
     });
 
     this.addCommand({
+      id: "set-task-status-waiting",
+      name: "Set task status to waiting ([?])",
+      hotkeys: [
+        {
+          modifiers: ["Mod"],
+          key: "\\",
+        },
+      ],
+      callback: () => {
+        runTaskStatusCommand(this.app, "?", true);
+      },
+    });
+
+    this.addCommand({
       id: "set-task-status-done",
       name: "Set task status to done ([x])",
       hotkeys: [

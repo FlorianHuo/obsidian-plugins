@@ -17,9 +17,24 @@ test("matchTaskLine recognizes in-progress tasks", () => {
   assert.equal(match[2], "/");
 });
 
+test("matchTaskLine recognizes waiting tasks", () => {
+  const match = matchTaskLine("- [?] task");
+
+  assert.ok(match);
+  assert.equal(match[1], "");
+  assert.equal(match[2], "?");
+});
+
 test("sortTaskContent keeps in-progress tasks with incomplete tasks and moves done tasks last", () => {
   const input = ["- [x] done", "- [/] doing", "- [ ] todo"].join("\n");
   const expected = ["- [/] doing", "- [ ] todo", "- [x] done"].join("\n");
+
+  assert.equal(sortTaskContent(input), expected);
+});
+
+test("sortTaskContent places waiting tasks between in-progress and incomplete", () => {
+  const input = ["- [ ] todo", "- [?] waiting", "- [x] done", "- [/] doing"].join("\n");
+  const expected = ["- [/] doing", "- [?] waiting", "- [ ] todo", "- [x] done"].join("\n");
 
   assert.equal(sortTaskContent(input), expected);
 });

@@ -17,6 +17,10 @@ function isInProgressTaskMarker(marker) {
   return marker === "/";
 }
 
+function isWaitingTaskMarker(marker) {
+  return marker === "?";
+}
+
 function isTaskLine(line) {
   return TASK_LINE_RE.test(line);
 }
@@ -74,6 +78,7 @@ function parseTokens(lines, startIndex, baseIndent) {
         marker,
         isCompleted,
         isInProgress: isInProgressTaskMarker(marker),
+        isWaiting: isWaitingTaskMarker(marker),
         lines: taskLines,
       });
       continue;
@@ -109,6 +114,12 @@ function buildSortedTaskList(tokens, preferredFrontTasks, preferredBackTasks) {
       !task.isCompleted &&
       !preferredFrontTasks.has(task)
   );
+  const currentWaiting = tasks.filter(
+    (task) =>
+      task.isWaiting &&
+      !task.isCompleted &&
+      !preferredFrontTasks.has(task)
+  );
   const preferredIncomplete = tasks.filter(
     (task) => preferredFrontTasks.has(task) && !task.isCompleted
   );
@@ -116,6 +127,7 @@ function buildSortedTaskList(tokens, preferredFrontTasks, preferredBackTasks) {
     (task) =>
       !task.isCompleted &&
       !task.isInProgress &&
+      !task.isWaiting &&
       !preferredFrontTasks.has(task)
   );
   const remainingComplete = tasks.filter(
@@ -127,6 +139,7 @@ function buildSortedTaskList(tokens, preferredFrontTasks, preferredBackTasks) {
 
   return [
     ...currentInProgress,
+    ...currentWaiting,
     ...preferredIncomplete,
     ...remainingIncomplete,
     ...preferredComplete,
@@ -418,6 +431,7 @@ module.exports = {
   getIndent,
   isCompletedTaskMarker,
   isInProgressTaskMarker,
+  isWaitingTaskMarker,
   isTaskCompletionChange,
   isTaskLine,
   findSortableTaskRegionInLines,
