@@ -1057,7 +1057,12 @@ function findShopLedgerInsertIndex(lines) {
     return ledgerHeadingIndex + 1;
   }
 
-  return actionHeadingIndex + 1;
+  let insertIndex = actionHeadingIndex + 1;
+  while (insertIndex < lines.length && lines[insertIndex].trim() === "") {
+    insertIndex += 1;
+  }
+
+  return insertIndex;
 }
 
 function getSettledMainlineTitlesFromShopContent(shopContent) {

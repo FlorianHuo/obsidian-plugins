@@ -847,9 +847,9 @@ test("applyCurrentDaySettlementToShopContent updates balance and inserts ledger 
     "**流水**",
     "",
     "**斯大林格勒（2026-04-08 起）**",
+    "",
     "2026-04-28 | +3 | 完成主线：完成 A | 余额 -276",
     "2026-04-28 | +3 | 完成主线：完成 B | 余额 -273",
-    "",
     "2026-04-27 | 0 | 准备阶段 | 余额 -279",
   ].join("\n"));
 });

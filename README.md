@@ -57,6 +57,7 @@ npm run dev
 - Add a repeatable `01-tracks/current.md` refresh action with the existing header icon and default `Alt+C` command: cache completed items to `01-tracks/cache/YYYY-MM-DD.md`, keep completed `日常` items out of `current.md` for the rest of the day, and prune completed `[x]` items out of `主线 / 支线`
 - Add `Preview current day settlement`, a read-only command that lists completed top-level `主线` items from today's cache without modifying `shop.md`
 - Add `Settle current day`, a manual command that records completed top-level `主线` items in `04-governance/shop.md` and updates the shop balance
+- `Settle current day` now inserts new shop ledger rows directly above existing rows without leaving a blank gap
 - `Mod+L` now inserts a new unchecked task on blank lines, and on an empty unchecked task line it clears the line back to blank
 - `Mod+/` now places a newly in-progress task above existing `[/]` siblings and unchecked `[ ]` siblings
 - `Mod+L` moves a newly completed task to the top of the current completed group, preserving the relative order of older `[x]` siblings
