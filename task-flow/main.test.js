@@ -319,7 +319,7 @@ test("applyTaskStatusCommandToEditor moves an in-progress task to the front of i
   });
 });
 
-test("applyTaskStatusCommandToEditor places a new in-progress task after existing in-progress siblings", () => {
+test("applyTaskStatusCommandToEditor places a new in-progress task before existing in-progress siblings", () => {
   const editor = createMockEditor(
     ["- [/] started", "- [ ] later", "- [ ] now", "- [x] done"],
     {
@@ -331,14 +331,14 @@ test("applyTaskStatusCommandToEditor places a new in-progress task after existin
   applyTaskStatusCommandToEditor(editor, "/", true);
 
   assert.deepEqual(editor.lines, [
-    "- [/] started",
     "- [/] now",
+    "- [/] started",
     "- [ ] later",
     "- [x] done",
   ]);
   assert.deepEqual(editor.selection, {
-    from: { line: 1, ch: 4 },
-    to: { line: 1, ch: 4 },
+    from: { line: 0, ch: 4 },
+    to: { line: 0, ch: 4 },
   });
 });
 

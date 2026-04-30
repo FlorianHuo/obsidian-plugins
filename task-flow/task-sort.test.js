@@ -67,7 +67,7 @@ test("sortTaskRegionLines can prioritize the current in-progress task to the bra
   ]);
 });
 
-test("sortTaskRegionLines keeps a newly in-progress task below existing in-progress siblings", () => {
+test("sortTaskRegionLines places a newly in-progress task above existing in-progress siblings", () => {
   const regionLines = [
     "- [/] started",
     "- [ ] later",
@@ -77,8 +77,8 @@ test("sortTaskRegionLines keeps a newly in-progress task below existing in-progr
   const { newLines } = sortTaskRegionLines(regionLines, "", [2]);
 
   assert.deepEqual(newLines, [
-    "- [/] started",
     "- [/] now",
+    "- [/] started",
     "- [ ] later",
     "- [x] done",
   ]);

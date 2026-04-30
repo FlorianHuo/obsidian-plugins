@@ -165,8 +165,8 @@ function createInlineTaskSortHelpers() {
     );
 
     return [
-      ...currentInProgress,
       ...preferredIncomplete,
+      ...currentInProgress,
       ...remainingIncomplete,
       ...preferredComplete,
       ...remainingComplete,

@@ -58,7 +58,7 @@ npm run dev
 - Add `Preview current day settlement`, a read-only command that lists completed top-level `主线` items from today's cache without modifying `shop.md`
 - Add `Settle current day`, a manual command that records completed top-level `主线` items in `04-governance/shop.md` and updates the shop balance
 - `Mod+L` now inserts a new unchecked task on blank lines, and on an empty unchecked task line it clears the line back to blank
-- `Mod+/` now places a newly in-progress task below existing `[/]` siblings and above unchecked `[ ]` siblings instead of forcing it to the very top
+- `Mod+/` now places a newly in-progress task above existing `[/]` siblings and unchecked `[ ]` siblings
 - `Mod+L` moves a newly completed task to the top of the current completed group, preserving the relative order of older `[x]` siblings
 - Native checkbox toggles now follow the same completed-group ordering rules as `Mod+L`, including nested sublists
 - Sorting a partial nested task region now preserves the trailing newline, so the next task no longer gets merged into the previous line
