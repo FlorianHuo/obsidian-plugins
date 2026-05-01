@@ -2052,6 +2052,30 @@ async function readVaultFileIfExists(app, path) {
   return app.vault.read(file);
 }
 
+function getOpenMarkdownViewForFile(app, path) {
+  const leaves = getMarkdownLeaves(app);
+  const leaf = leaves.find((candidate) => candidate?.view?.file?.path === path);
+  return leaf?.view || null;
+}
+
+async function saveOpenMarkdownFile(app, path) {
+  const view = getOpenMarkdownViewForFile(app, path);
+  if (!view) {
+    return false;
+  }
+
+  if (typeof view.save === "function") {
+    await view.save();
+    return true;
+  }
+
+  if (typeof view.requestSave === "function") {
+    view.requestSave();
+  }
+
+  return false;
+}
+
 async function ensureVaultFolder(app, folderPath) {
   if (app.vault.getAbstractFileByPath(folderPath)) {
     return;
@@ -2090,6 +2114,8 @@ async function refreshCurrentDailySection(
   pluginData = {},
   saveData = async () => {}
 ) {
+  await saveOpenMarkdownFile(app, CURRENT_TRACKS_FILE_PATH);
+
   const today = getTodayDateStr();
   const tracksFile = app.vault.getAbstractFileByPath(TRACKS_FILE_PATH);
   const currentFile = app.vault.getAbstractFileByPath(CURRENT_TRACKS_FILE_PATH);

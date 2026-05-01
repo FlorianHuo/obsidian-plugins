@@ -1172,6 +1172,92 @@ test("refreshCurrentDailySection writes cache and can run repeatedly in one day"
   assert.deepEqual(saveDataCalls, []);
 });
 
+test("refreshCurrentDailySection saves an open current.md view before reading completed tasks", async () => {
+  const today = getTodayDateStr();
+  const cachePath = getCurrentDailyCacheFilePath(today);
+  const tasks = Array.from({ length: 7 }, (_, index) => `任务 ${index + 1}`);
+  const folders = new Set(["01-tracks"]);
+  const savedCurrentContent = [
+    "**日常**",
+    "",
+    "- [ ] 任务 1",
+    ...tasks.slice(1).map((task) => `- [x] ${task}`),
+    "",
+    "**主线**",
+    "",
+    "**支线**",
+    "",
+  ].join("\n");
+  const openCurrentContent = [
+    "**日常**",
+    "",
+    ...tasks.map((task) => `- [x] ${task}`),
+    "",
+    "**主线**",
+    "",
+    "**支线**",
+    "",
+  ].join("\n");
+  const fileContents = new Map([
+    [
+      "01-tracks/tracks.md",
+      [
+        "## Rhythms",
+        "",
+        "**Daily**",
+        "",
+        ...tasks.map((task) => `- ${task}`),
+        "",
+      ].join("\n"),
+    ],
+    ["01-tracks/current.md", savedCurrentContent],
+  ]);
+  const currentLeaf = {
+    view: {
+      file: { path: "01-tracks/current.md" },
+      addAction() {},
+      async save() {
+        fileContents.set("01-tracks/current.md", openCurrentContent);
+      },
+    },
+  };
+  const app = {
+    workspace: {
+      iterateAllLeaves(callback) {
+        callback(currentLeaf);
+      },
+    },
+    vault: {
+      getAbstractFileByPath(path) {
+        return fileContents.has(path) || folders.has(path) ? { path } : null;
+      },
+      async create(path, content) {
+        fileContents.set(path, content);
+      },
+      async createFolder(path) {
+        folders.add(path);
+      },
+      async read(file) {
+        return fileContents.get(file.path);
+      },
+      async process(file, updater) {
+        fileContents.set(file.path, updater(fileContents.get(file.path)));
+      },
+    },
+  };
+
+  assert.equal(await refreshCurrentDailySection(app), true);
+  assert.equal(fileContents.get("01-tracks/current.md"), [
+    "**日常**",
+    "",
+    "**主线**",
+    "",
+    "**支线**",
+    "",
+  ].join("\n"));
+  assert.equal(parseCurrentDailyCacheEntries(fileContents.get(cachePath))["日常"].length, 7);
+});
+
 test("isCurrentTracksFile only matches 01-tracks/current.md", () => {
   assert.equal(isCurrentTracksFile({ path: "01-tracks/current.md" }), true);
   assert.equal(isCurrentTracksFile({ path: "01-tracks/tracks.md" }), false);

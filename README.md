@@ -59,6 +59,7 @@ npm run dev
 - Add `Settle current day`, a manual command that records completed top-level `主线` items in `04-governance/shop.md` and updates the shop balance
 - `Settle current day` now inserts new shop ledger rows directly above existing rows without leaving a blank gap
 - `Settle current day` now restores hidden completed `日常` tasks in `current.md` from `Rhythms/Daily`
+- `Alt+C` now saves an open `current.md` view before refresh so newly completed tasks are pruned in the same run
 - `Mod+L` now inserts a new unchecked task on blank lines, and on an empty unchecked task line it clears the line back to blank
 - `Mod+/` now places a newly in-progress task above existing `[/]` siblings and unchecked `[ ]` siblings
 - `Mod+L` moves a newly completed task to the top of the current completed group, preserving the relative order of older `[x]` siblings
