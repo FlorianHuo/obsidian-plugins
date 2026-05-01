@@ -24,6 +24,7 @@ const {
   refreshCurrentDailySection,
   replaceCurrentDailySection,
   removeDailyRefreshHeaderAction,
+  settleCurrentDay,
   syncDailyRefreshHeaderActions,
   setTaskStatus,
   toggleStatusOnLine,
@@ -875,6 +876,176 @@ test("applyCurrentDaySettlementToShopContent skips already settled mainline titl
   assert.equal(result.changed, false);
   assert.deepEqual(result.settledItems, []);
   assert.equal(result.content, shopContent);
+});
+
+test("settleCurrentDay records mainline items and restores daily tasks", async () => {
+  const date = "2026-04-28";
+  const cachePath = getCurrentDailyCacheFilePath(date);
+  const fileContents = new Map([
+    [
+      "01-tracks/tracks.md",
+      [
+        "## Rhythms",
+        "",
+        "**Daily**",
+        "- 起床任务",
+        "- 读三篇论文",
+        "",
+      ].join("\n"),
+    ],
+    [
+      "01-tracks/current.md",
+      [
+        "**今日：结算后恢复日常**",
+        "",
+        "**日常**",
+        "",
+        "- [ ] 读三篇论文",
+        "",
+        "**主线**",
+        "",
+        "- [ ] 保留中的主线",
+        "",
+        "**支线**",
+        "",
+      ].join("\n"),
+    ],
+    [
+      cachePath,
+      [
+        "# 2026-04-28",
+        "",
+        "## 日常",
+        "",
+        "- [x] 起床任务",
+        "",
+        "## 主线",
+        "",
+        "- [x] 完成 A",
+        "",
+        "## 支线",
+        "",
+      ].join("\n"),
+    ],
+    [
+      "04-governance/shop.md",
+      [
+        "**余额：-279 | 当前连续：0 天 | 最长记录：8 天**",
+        "",
+        "**流水**",
+        "",
+        "**斯大林格勒（2026-04-08 起）**",
+        "",
+        "2026-04-27 | 0 | 准备阶段 | 余额 -279",
+      ].join("\n"),
+    ],
+  ]);
+  const app = {
+    vault: {
+      getAbstractFileByPath(path) {
+        return fileContents.has(path) ? { path } : null;
+      },
+      async read(file) {
+        return fileContents.get(file.path);
+      },
+      async process(file, updater) {
+        fileContents.set(file.path, updater(fileContents.get(file.path)));
+      },
+    },
+  };
+
+  assert.equal(await settleCurrentDay(app, date), true);
+  assert.equal(fileContents.get("01-tracks/current.md"), [
+    "**今日：结算后恢复日常**",
+    "",
+    "**日常**",
+    "",
+    "- [ ] 起床任务",
+    "- [ ] 读三篇论文",
+    "",
+    "**主线**",
+    "",
+    "- [ ] 保留中的主线",
+    "",
+    "**支线**",
+    "",
+  ].join("\n"));
+  assert.match(
+    fileContents.get("04-governance/shop.md"),
+    /2026-04-28 \| \+3 \| 完成主线：完成 A \| 余额 -276/
+  );
+});
+
+test("settleCurrentDay restores daily tasks even when no mainline items are completed", async () => {
+  const date = "2026-04-28";
+  const cachePath = getCurrentDailyCacheFilePath(date);
+  const fileContents = new Map([
+    [
+      "01-tracks/tracks.md",
+      [
+        "## Rhythms",
+        "",
+        "**Daily**",
+        "- 起床任务",
+        "- 读三篇论文",
+        "",
+      ].join("\n"),
+    ],
+    [
+      "01-tracks/current.md",
+      [
+        "**日常**",
+        "",
+        "- [ ] 读三篇论文",
+        "",
+        "**主线**",
+        "",
+        "**支线**",
+        "",
+      ].join("\n"),
+    ],
+    [
+      cachePath,
+      [
+        "# 2026-04-28",
+        "",
+        "## 日常",
+        "",
+        "- [x] 起床任务",
+        "",
+        "## 主线",
+        "",
+        "## 支线",
+        "",
+      ].join("\n"),
+    ],
+  ]);
+  const app = {
+    vault: {
+      getAbstractFileByPath(path) {
+        return fileContents.has(path) ? { path } : null;
+      },
+      async read(file) {
+        return fileContents.get(file.path);
+      },
+      async process(file, updater) {
+        fileContents.set(file.path, updater(fileContents.get(file.path)));
+      },
+    },
+  };
+
+  assert.equal(await settleCurrentDay(app, date), true);
+  assert.equal(fileContents.get("01-tracks/current.md"), [
+    "**日常**",
+    "",
+    "- [ ] 起床任务",
+    "- [ ] 读三篇论文",
+    "",
+    "**主线**",
+    "",
+    "**支线**",
+    "",
+  ].join("\n"));
 });
 
 test("getTodayDateStr uses the configured timezone instead of UTC", () => {

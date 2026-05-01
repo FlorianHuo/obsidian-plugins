@@ -2164,6 +2164,46 @@ async function previewCurrentDaySettlement(app, date = getTodayDateStr()) {
   };
 }
 
+async function restoreCurrentDailySection(app) {
+  const tracksFile = app.vault.getAbstractFileByPath(TRACKS_FILE_PATH);
+  const currentFile = app.vault.getAbstractFileByPath(CURRENT_TRACKS_FILE_PATH);
+
+  if (!tracksFile || !currentFile) {
+    return {
+      changed: false,
+      failed: true,
+    };
+  }
+
+  const tracksContent = await app.vault.read(tracksFile);
+  const dailyTasks = extractRhythmsDailyTasks(tracksContent);
+  if (dailyTasks === null) {
+    return {
+      changed: false,
+      failed: true,
+    };
+  }
+
+  let changed = false;
+  let failed = false;
+
+  await app.vault.process(currentFile, (data) => {
+    const updated = replaceCurrentDailySection(data, dailyTasks);
+    if (updated === null) {
+      failed = true;
+      return data;
+    }
+
+    changed = updated !== data;
+    return updated;
+  });
+
+  return {
+    changed,
+    failed,
+  };
+}
+
 async function settleCurrentDay(app, date = getTodayDateStr()) {
   const cachePath = getCurrentDailyCacheFilePath(date);
   const cacheContent = await readVaultFileIfExists(app, cachePath);
@@ -2173,41 +2213,54 @@ async function settleCurrentDay(app, date = getTodayDateStr()) {
   }
 
   const items = extractCompletedMainlineSettlementItems(cacheContent);
-  if (items.length === 0) {
-    new NoticeClass(`Settle ${date}: no completed mainline items.`);
-    return false;
-  }
+  let result = {
+    changed: false,
+    settledItems: [],
+  };
 
-  const shopFile = app.vault.getAbstractFileByPath(SHOP_FILE_PATH);
-  if (!shopFile) {
-    new NoticeClass("Missing 04-governance/shop.md for settlement.");
-    return false;
-  }
-
-  let result = null;
-  await app.vault.process(shopFile, (data) => {
-    result = applyCurrentDaySettlementToShopContent(data, date, items);
-    if (result === null || !result.changed) {
-      return data;
+  if (items.length > 0) {
+    const shopFile = app.vault.getAbstractFileByPath(SHOP_FILE_PATH);
+    if (!shopFile) {
+      new NoticeClass("Missing 04-governance/shop.md for settlement.");
+      return false;
     }
 
-    return result.content;
-  });
+    await app.vault.process(shopFile, (data) => {
+      result = applyCurrentDaySettlementToShopContent(data, date, items);
+      if (result === null || !result.changed) {
+        return data;
+      }
 
-  if (result === null) {
-    new NoticeClass("Settlement failed: shop.md format was not recognized.");
-    return false;
+      return result.content;
+    });
+
+    if (result === null) {
+      new NoticeClass("Settlement failed: shop.md format was not recognized.");
+      return false;
+    }
   }
 
-  if (!result.changed) {
-    new NoticeClass(`Settle ${date}: no new completed mainline items.`);
-    return false;
+  const restoreResult = await restoreCurrentDailySection(app);
+  const restoreMessage = restoreResult.changed
+    ? " Daily tasks restored."
+    : restoreResult.failed
+      ? " Daily restore failed."
+      : "";
+
+  if (result.changed) {
+    new NoticeClass(
+      `Settle ${date}: recorded ${result.settledItems.length} mainline item(s), +${result.settledItems.length * 3} points.${restoreMessage}`
+    );
+    return true;
   }
 
-  new NoticeClass(
-    `Settle ${date}: recorded ${result.settledItems.length} mainline item(s), +${result.settledItems.length * 3} points.`
-  );
-  return true;
+  if (items.length > 0) {
+    new NoticeClass(`Settle ${date}: no new completed mainline items.${restoreMessage}`);
+    return restoreResult.changed;
+  }
+
+  new NoticeClass(`Settle ${date}: no completed mainline items.${restoreMessage}`);
+  return restoreResult.changed;
 }
 
 function runTaskStatusCommand(app, statusChar, isToggle) {
@@ -2447,6 +2500,7 @@ module.exports.refreshCurrentDailySection = refreshCurrentDailySection;
 module.exports.renderCurrentDaySettlementPreview = renderCurrentDaySettlementPreview;
 module.exports.renderCurrentDailyCacheContent = renderCurrentDailyCacheContent;
 module.exports.replaceCurrentDailySection = replaceCurrentDailySection;
+module.exports.restoreCurrentDailySection = restoreCurrentDailySection;
 module.exports.runCurrentDailyRefresh = runCurrentDailyRefresh;
 module.exports.setTaskStatus = setTaskStatus;
 module.exports.settleCurrentDay = settleCurrentDay;
