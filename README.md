@@ -43,7 +43,7 @@ npm run dev
 | Plugin | Description | Status |
 |--------|-------------|--------|
 | [task-flow](./task-flow/) | Add task status shortcuts plus editor task sorting for Things-style workflows | v0.1.0 |
-| [workspace-switcher](./workspace-switcher/) | Manage workspaces: built-in TODO/Focus layouts, save/load/delete custom workspaces, auto-update daily notes in Beijing time | v1.1.0 |
+| [workspace-switcher](./workspace-switcher/) | Manage saved workspaces with quick switching and auto-update daily notes in Beijing time | v1.1.1 |
 
 ## Changelog
 
@@ -80,6 +80,12 @@ npm run dev
 ### workspace-switcher
 
 #### Unreleased
+
+- `Alt+W` now toggles directly between the two most recently loaded saved workspaces, with the picker kept as the fallback/manual selection path
+- Loading or toggling a workspace no longer shows a success notification
+- Legacy saved workspace data now uses the core Daily notes folder setting, then falls back to existing dated note paths, avoiding startup failures when `journal/` is not the vault's journal folder
+
+#### v1.1.1 (2026-04-28)
 
 - Daily journal path updates use `Asia/Shanghai` instead of the computer's local timezone
 - While Obsidian stays open, the plugin checks for a new Beijing day every minute and refreshes stale daily workspace journal paths automatically

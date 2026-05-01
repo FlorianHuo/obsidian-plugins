@@ -2,6 +2,7 @@
 //
 // Saved workspaces:
 //   - Save / Load / Delete custom layouts via commands
+//   - Toggle between the two most recently loaded workspaces via Alt+W
 //
 // Key design: uses workspace.getLayout() to preserve sidebars,
 // only modifies the "main" area of the layout.
@@ -55,6 +56,46 @@ function parsePathRewriteRules(rulesText) {
       };
     })
     .filter(Boolean);
+}
+
+function collectLayoutFiles(node, files = []) {
+  if (!node || typeof node !== "object") return files;
+  if (node.type === "leaf" && node.state && node.state.state &&
+      typeof node.state.state.file === "string") {
+    files.push(node.state.state.file);
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) collectLayoutFiles(child, files);
+  }
+  return files;
+}
+
+function inferDailyNoteFolderFromWorkspaces(workspaces = {}) {
+  const folderCounts = new Map();
+  const dailyPathRe = /^(.+)\/\d{4}-\d{2}-\d{2}\.md$/;
+
+  for (const workspace of Object.values(workspaces || {})) {
+    for (const key of Object.keys(workspace || {})) {
+      for (const file of collectLayoutFiles(workspace[key])) {
+        const match = dailyPathRe.exec(file);
+        if (!match) continue;
+
+        const folder = normalizeDailyNoteFolder(match[1]);
+        folderCounts.set(folder, (folderCounts.get(folder) || 0) + 1);
+      }
+    }
+  }
+
+  let bestFolder = null;
+  let bestCount = 0;
+  for (const [folder, count] of folderCounts.entries()) {
+    if (count > bestCount) {
+      bestFolder = folder;
+      bestCount = count;
+    }
+  }
+
+  return bestFolder;
 }
 
 // Modal for selecting a saved workspace from a fuzzy-search list
@@ -225,16 +266,23 @@ class WorkspaceSwitcherSettingTab extends obsidian.PluginSettingTab {
 }
 
 class WorkspaceSwitcherPlugin extends obsidian.Plugin {
-  constructor(app) {
-    super(app);
+  constructor(...args) {
+    super(...args);
     this.settings = normalizeSettings();
   }
 
   async onload() {
-    // Load persisted data for saved workspaces and rollover tracking.
+    // Load persisted data for saved workspaces and recent switching.
     this.data = (await this.loadData()) || {};
     if (!this.data.workspaces) this.data.workspaces = {};
+    this.data.recentWorkspaceNames = this.getRecentWorkspaceNames();
     this.settings = normalizeSettings(this.data.settings);
+    if (!this.data.settings || !this.data.settings.dailyNoteFolder) {
+      this.settings.dailyNoteFolder =
+        await this.loadCoreDailyNoteFolder() ||
+        inferDailyNoteFolderFromWorkspaces(this.data.workspaces) ||
+        this.settings.dailyNoteFolder;
+    }
     this.data.settings = this.settings;
     this.lastSeenDate = this.getTodayDateStr();
     this.isDateRefreshInFlight = false;
@@ -251,13 +299,19 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
 
     this.addCommand({
       id: "quick-switch-workspace",
-      name: "Quick switch workspace",
+      name: "Switch to recent workspace",
       hotkeys: [
         {
           modifiers: ["Alt"],
           key: "W",
         },
       ],
+      callback: () => this.toggleRecentWorkspace(),
+    });
+
+    this.addCommand({
+      id: "open-workspace-picker",
+      name: "Quick switch workspace",
       callback: () => this.openWorkspaceQuickSwitch(),
     });
 
@@ -367,6 +421,21 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     return normalizeDailyNoteFolder(this.settings && this.settings.dailyNoteFolder);
   }
 
+  async loadCoreDailyNoteFolder() {
+    const adapter = this.app.vault && this.app.vault.adapter;
+    if (!adapter || typeof adapter.read !== "function") return null;
+
+    try {
+      const raw = await adapter.read(".obsidian/daily-notes.json");
+      const dailyNotesSettings = JSON.parse(raw);
+      return dailyNotesSettings && dailyNotesSettings.folder
+        ? normalizeDailyNoteFolder(dailyNotesSettings.folder)
+        : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   getDailyNotePath(date) {
     return `${this.getDailyNoteFolder()}/${date}.md`;
   }
@@ -378,11 +447,26 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
 
   // Ensure a file exists; create it if missing
   async ensureFile(path) {
+    await this.ensureFolderForPath(path);
     let file = this.app.vault.getAbstractFileByPath(path);
     if (!file) {
       file = await this.app.vault.create(path, "");
     }
     return file;
+  }
+
+  async ensureFolderForPath(path) {
+    const parts = path.split("/");
+    parts.pop();
+    if (parts.length === 0) return;
+
+    let currentPath = "";
+    for (const part of parts) {
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
+      if (!this.app.vault.getAbstractFileByPath(currentPath)) {
+        await this.app.vault.createFolder(currentPath);
+      }
+    }
   }
 
   // Get the current full layout, replace only the "main" part, then apply.
@@ -409,6 +493,50 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     }).open();
   }
 
+  getRecentWorkspaceNames() {
+    const savedNames = new Set(Object.keys((this.data && this.data.workspaces) || {}));
+    const recentNames = Array.isArray(this.data && this.data.recentWorkspaceNames)
+      ? this.data.recentWorkspaceNames
+      : [];
+    const normalized = [];
+
+    for (const name of recentNames) {
+      if (typeof name !== "string" || !savedNames.has(name) ||
+          normalized.includes(name)) {
+        continue;
+      }
+      normalized.push(name);
+      if (normalized.length === 2) break;
+    }
+
+    return normalized;
+  }
+
+  rememberRecentWorkspace(name) {
+    const recentNames = this.getRecentWorkspaceNames()
+      .filter((recentName) => recentName !== name);
+    this.data.recentWorkspaceNames = [name, ...recentNames].slice(0, 2);
+  }
+
+  async toggleRecentWorkspace() {
+    const names = Object.keys(this.data.workspaces);
+    if (names.length === 0) {
+      new obsidian.Notice("No saved workspaces.");
+      return;
+    }
+
+    const recentNames = this.getRecentWorkspaceNames();
+    this.data.recentWorkspaceNames = recentNames;
+
+    if (recentNames.length < 2) {
+      new obsidian.Notice("Choose a second workspace to enable recent switching.");
+      this.openWorkspaceQuickSwitch();
+      return;
+    }
+
+    await this.loadSavedWorkspaceByName(recentNames[1]);
+  }
+
   async saveCurrentWorkspace() {
     const name = await this.promptForName("Save workspace as:");
     if (!name) return;
@@ -416,6 +544,7 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     // Capture the full layout (including sidebars)
     const layout = this.app.workspace.getLayout();
     this.data.workspaces[name] = layout;
+    this.rememberRecentWorkspace(name);
     await this.saveData(this.data);
     new obsidian.Notice(`Workspace "${name}" saved.`);
   }
@@ -452,7 +581,8 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
     await this.ensureFile(todayPath);
 
     await this.app.workspace.changeLayout(layout);
-    new obsidian.Notice(`Workspace "${name}" loaded.`);
+    this.rememberRecentWorkspace(name);
+    await this.saveData(this.data);
   }
 
   // Normalize vault paths through user-configured local rewrite rules.
@@ -494,6 +624,7 @@ class WorkspaceSwitcherPlugin extends obsidian.Plugin {
 
     new WorkspacePickerModal(this.app, names, async (name) => {
       delete this.data.workspaces[name];
+      this.data.recentWorkspaceNames = this.getRecentWorkspaceNames();
       await this.saveData(this.data);
       new obsidian.Notice(`Workspace "${name}" deleted.`);
     }).open();
