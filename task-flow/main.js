@@ -502,6 +502,7 @@ const TRACKS_FILE_PATH = "01-tracks/tracks.md";
 const CURRENT_DAILY_CACHE_FOLDER_PATH = "01-tracks/cache";
 const SHOP_FILE_PATH = "04-governance/shop.md";
 const DAILY_TIME_ZONE = "Asia/Shanghai";
+const DAY_BOUNDARY_HOUR = 4;
 const DAILY_REFRESH_ICON = "refresh-cw";
 const DAILY_HEADER_ACTION_CLASS = "task-flow-refresh-current-daily";
 const CURRENT_DAILY_CACHE_SECTION_NAMES = ["日常", "主线", "支线"];
@@ -518,12 +519,13 @@ function preserveTrailingNewlines(sourceText, updatedText) {
 }
 
 function getTodayDateStr(timeZone = DAILY_TIME_ZONE, now = new Date()) {
+  const adjusted = new Date(now.getTime() - DAY_BOUNDARY_HOUR * 60 * 60 * 1000);
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).formatToParts(now);
+  }).formatToParts(adjusted);
 
   const dateParts = {};
   for (const part of parts) {
@@ -1442,6 +1444,129 @@ function markAncestorTasksInLineArray(lines, childLineNumber) {
   return changedLineNumbers;
 }
 
+function getTaskAncestorLineNumbersInLineArray(lines, childLineNumber) {
+  const childTask = matchTaskLine(lines[childLineNumber]);
+  if (!childTask) {
+    return [];
+  }
+
+  let currentIndentLength = childTask[1].length;
+  if (currentIndentLength === 0) {
+    return [];
+  }
+
+  const ancestorLineNumbers = [];
+
+  for (let lineNumber = childLineNumber - 1; lineNumber >= 0; lineNumber -= 1) {
+    const line = lines[lineNumber];
+    if (line.trim() === "") {
+      continue;
+    }
+
+    const taskMatch = matchTaskLine(line);
+    if (!taskMatch) {
+      continue;
+    }
+
+    const indentLength = taskMatch[1].length;
+    if (indentLength >= currentIndentLength) {
+      continue;
+    }
+
+    ancestorLineNumbers.push(lineNumber);
+    currentIndentLength = indentLength;
+    if (currentIndentLength === 0) {
+      break;
+    }
+  }
+
+  return ancestorLineNumbers;
+}
+
+function hasChildTaskInLineArray(lines, parentLineNumber) {
+  const parentTask = matchTaskLine(lines[parentLineNumber]);
+  if (!parentTask) {
+    return false;
+  }
+
+  const parentIndentLength = parentTask[1].length;
+  const subtreeEndLine = findTaskSubtreeEndInLines(lines, parentLineNumber);
+
+  for (let lineNumber = parentLineNumber + 1; lineNumber <= subtreeEndLine; lineNumber += 1) {
+    const taskMatch = matchTaskLine(lines[lineNumber]);
+    if (taskMatch && taskMatch[1].length > parentIndentLength) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function hasInProgressDescendantTaskInLineArray(lines, parentLineNumber) {
+  const parentTask = matchTaskLine(lines[parentLineNumber]);
+  if (!parentTask) {
+    return false;
+  }
+
+  const parentIndentLength = parentTask[1].length;
+  const subtreeEndLine = findTaskSubtreeEndInLines(lines, parentLineNumber);
+
+  for (let lineNumber = parentLineNumber + 1; lineNumber <= subtreeEndLine; lineNumber += 1) {
+    const taskMatch = matchTaskLine(lines[lineNumber]);
+    if (
+      taskMatch &&
+      taskMatch[1].length > parentIndentLength &&
+      taskMatch[2] === "/"
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function normalizeStaleInProgressParentTasksInLineArray(lines, seedLineNumbers) {
+  const candidateLineNumbers = new Set();
+
+  for (const seedLineNumber of seedLineNumbers) {
+    if (seedLineNumber < 0 || seedLineNumber >= lines.length) {
+      continue;
+    }
+
+    if (matchTaskLine(lines[seedLineNumber])) {
+      candidateLineNumbers.add(seedLineNumber);
+    }
+
+    for (const ancestorLineNumber of getTaskAncestorLineNumbersInLineArray(
+      lines,
+      seedLineNumber
+    )) {
+      candidateLineNumbers.add(ancestorLineNumber);
+    }
+  }
+
+  const changedLineNumbers = [];
+  for (const lineNumber of [...candidateLineNumbers].sort((a, b) => b - a)) {
+    const taskMatch = matchTaskLine(lines[lineNumber]);
+    if (!taskMatch || taskMatch[2] !== "/") {
+      continue;
+    }
+
+    if (!hasChildTaskInLineArray(lines, lineNumber)) {
+      continue;
+    }
+
+    if (hasInProgressDescendantTaskInLineArray(lines, lineNumber)) {
+      continue;
+    }
+
+    lines[lineNumber] = applyStatusToLine(lines[lineNumber], " ");
+    changedLineNumbers.push(lineNumber);
+  }
+
+  return changedLineNumbers.sort((a, b) => a - b);
+}
+
 function markAncestorTasksInEditor(editor, childLineNumbers) {
   const lineCount = getEditorLineCount(editor);
   if (lineCount === 0 || childLineNumbers.length === 0) {
@@ -1466,6 +1591,25 @@ function markAncestorTasksInEditor(editor, childLineNumbers) {
   }
 
   return [...changedLineNumbers].sort((a, b) => a - b);
+}
+
+function normalizeStaleInProgressParentTasksInEditor(editor, seedLineNumbers) {
+  const lineCount = getEditorLineCount(editor);
+  if (lineCount === 0 || seedLineNumbers.length === 0) {
+    return [];
+  }
+
+  const lines = Array.from({ length: lineCount }, (_, index) => editor.getLine(index));
+  const changedLineNumbers = normalizeStaleInProgressParentTasksInLineArray(
+    lines,
+    seedLineNumbers
+  );
+
+  for (const lineNumber of changedLineNumbers) {
+    editor.setLine(lineNumber, lines[lineNumber]);
+  }
+
+  return changedLineNumbers;
 }
 
 function updateEditorLines(editor, lineTransformer) {
@@ -1658,6 +1802,13 @@ function applyTaskStatusCommandToEditor(editor, statusChar, isToggle) {
   )) {
     affectedTaskLines.push(changedLineNumber);
     preferredBackLineNumbers.push(changedLineNumber);
+  }
+
+  for (const changedLineNumber of normalizeStaleInProgressParentTasksInEditor(
+    editor,
+    affectedTaskLines
+  )) {
+    affectedTaskLines.push(changedLineNumber);
   }
 
   sortEditorTaskRegions(
@@ -1944,6 +2095,9 @@ function buildSortedToggleTransactionSpec(doc, selection, toggle) {
   const toggledLineOffset = toggle.lineNumber - region.startLine;
   const preferredFrontLineOffsets = [];
   const preferredBackLineOffsets = [];
+  const docLines = Array.from({ length: doc.lines }, (_, index) =>
+    doc.line(index + 1).text
+  );
 
   if (toggledTask) {
     if (toggledTask[2] === "/") {
@@ -1954,17 +2108,33 @@ function buildSortedToggleTransactionSpec(doc, selection, toggle) {
     }
   }
 
-  let regionContent = regionText;
+  const regionLines = regionText.split("\n");
   if (isCompletedTaskMarker(toggledTask?.[2])) {
-    const regionLines = regionText.split("\n");
-    const changedLineOffsets = completeDescendantTasksInLineArray(
+    completeDescendantTasksInLineArray(
       regionLines,
       toggledLineOffset
     );
-    if (changedLineOffsets.length > 0) {
-      regionContent = preserveTrailingNewlines(regionText, regionLines.join("\n"));
-    }
+    completeDescendantTasksInLineArray(docLines, toggle.lineNumber - 1);
   }
+
+  const normalizedLineNumbers = normalizeStaleInProgressParentTasksInLineArray(
+    docLines,
+    [toggle.lineNumber - 1]
+  );
+  const firstRegionLineIndex = region.startLine - 1;
+  const lastRegionLineIndex = region.endLine - 1;
+  for (const lineNumber of normalizedLineNumbers) {
+    if (lineNumber < firstRegionLineIndex || lineNumber > lastRegionLineIndex) {
+      continue;
+    }
+
+    regionLines[lineNumber - firstRegionLineIndex] = docLines[lineNumber];
+  }
+
+  const regionContent = preserveTrailingNewlines(
+    regionText,
+    regionLines.join("\n")
+  );
 
   const sortedRegion = sortTaskRegionText(
     regionContent,
@@ -1972,24 +2142,47 @@ function buildSortedToggleTransactionSpec(doc, selection, toggle) {
     preferredFrontLineOffsets,
     preferredBackLineOffsets
   );
-  if (sortedRegion === regionText) return null;
+  const changes = [];
+
+  for (const lineNumber of normalizedLineNumbers) {
+    if (lineNumber >= firstRegionLineIndex && lineNumber <= lastRegionLineIndex) {
+      continue;
+    }
+
+    const line = doc.line(lineNumber + 1);
+    changes.push({
+      from: line.from,
+      to: line.to,
+      insert: docLines[lineNumber],
+    });
+  }
+
+  if (sortedRegion !== regionText) {
+    changes.push({ from: region.from, to: region.to, insert: sortedRegion });
+  }
+
+  if (changes.length === 0) return null;
+  changes.sort((a, b) => a.from - b.from);
 
   const replacement = ChangeSetClass.of(
-    [{ from: region.from, to: region.to, insert: sortedRegion }],
+    changes,
     doc.length
   );
   const mappedSelection = selection.map(replacement);
-  const finalSelection = remapSelectionIntoSortedTask(
-    selection,
-    mappedSelection,
-    region,
-    regionText,
-    sortedRegion,
-    toggle.pos
-  );
+  const finalSelection =
+    sortedRegion === regionText
+      ? mappedSelection
+      : remapSelectionIntoSortedTask(
+          selection,
+          mappedSelection,
+          region,
+          regionText,
+          sortedRegion,
+          toggle.pos
+        );
 
   return {
-    changes: [{ from: region.from, to: region.to, insert: sortedRegion }],
+    changes,
     filter: false,
     selection: finalSelection,
   };
@@ -2518,6 +2711,7 @@ module.exports.getTodayDateStr = getTodayDateStr;
 module.exports.isCurrentTracksFile = isCurrentTracksFile;
 module.exports.markAncestorTasksInLineArray = markAncestorTasksInLineArray;
 module.exports.mergeCurrentDailyCacheContent = mergeCurrentDailyCacheContent;
+module.exports.normalizeStaleInProgressParentTasksInLineArray = normalizeStaleInProgressParentTasksInLineArray;
 module.exports.parseCurrentDailyCacheEntries = parseCurrentDailyCacheEntries;
 module.exports.previewCurrentDaySettlement = previewCurrentDaySettlement;
 module.exports.registerDailyRefreshHeaderActions = registerDailyRefreshHeaderActions;

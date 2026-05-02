@@ -42,7 +42,7 @@ npm run dev
 
 | Plugin | Description | Status |
 |--------|-------------|--------|
-| [task-flow](./task-flow/) | Add task status shortcuts plus editor task sorting for Things-style workflows | v0.1.0 |
+| [task-flow](./task-flow/) | Add task status shortcuts plus editor task sorting for Things-style workflows | v0.1.1 |
 | [workspace-switcher](./workspace-switcher/) | Manage saved workspaces with quick switching and auto-update daily notes in Beijing time | v1.1.1 |
 
 ## Changelog
@@ -65,6 +65,7 @@ npm run dev
 - `Mod+/` now places a newly in-progress task above existing `[/]` siblings and unchecked `[ ]` siblings
 - `Mod+L` moves a newly completed task to the top of the current completed group, preserving the relative order of older `[x]` siblings
 - Native checkbox toggles now follow the same completed-group ordering rules as `Mod+L`, including nested sublists
+- Parent tasks now reset from `[/]` to `[ ]` when no child task remains in progress
 - Sorting a partial nested task region now preserves the trailing newline, so the next task no longer gets merged into the previous line
 - Native checkbox auto-sorting now runs as a follow-up edit instead of a same-transaction rewrite, which avoids Live Preview conflict markers
 

@@ -19,6 +19,7 @@ const {
   isCurrentTracksFile,
   markAncestorTasksInLineArray,
   mergeCurrentDailyCacheContent,
+  normalizeStaleInProgressParentTasksInLineArray,
   parseCurrentDailyCacheEntries,
   renderCurrentDaySettlementPreview,
   refreshCurrentDailySection,
@@ -440,6 +441,59 @@ test("markAncestorTasksInLineArray marks each ancestor as in progress", () => {
     "      note that should stay as text",
     "- [ ] sibling",
   ]);
+});
+
+test("normalizeStaleInProgressParentTasksInLineArray clears parents without in-progress children", () => {
+  const lines = [
+    "- [/] top",
+    "  - [/] middle",
+    "    - [x] finished child",
+    "  - [?] waiting child",
+    "- [/] active top",
+    "  - [/] active child",
+    "- [/] leaf task",
+  ];
+
+  const changedLineNumbers = normalizeStaleInProgressParentTasksInLineArray(lines, [2]);
+
+  assert.deepEqual(changedLineNumbers, [0, 1]);
+  assert.deepEqual(lines, [
+    "- [ ] top",
+    "  - [ ] middle",
+    "    - [x] finished child",
+    "  - [?] waiting child",
+    "- [/] active top",
+    "  - [/] active child",
+    "- [/] leaf task",
+  ]);
+});
+
+test("applyTaskStatusCommandToEditor clears a parent when its last in-progress child is completed", () => {
+  const editor = createMockEditor(
+    [
+      "- [/] parent",
+      "  - [/] child now",
+      "  - [ ] child later",
+      "- [ ] sibling",
+    ],
+    {
+      from: { line: 1, ch: 6 },
+      to: { line: 1, ch: 6 },
+    }
+  );
+
+  applyTaskStatusCommandToEditor(editor, "x", true);
+
+  assert.deepEqual(editor.lines, [
+    "- [ ] parent",
+    "  - [ ] child later",
+    "  - [x] child now",
+    "- [ ] sibling",
+  ]);
+  assert.deepEqual(editor.selection, {
+    from: { line: 2, ch: 6 },
+    to: { line: 2, ch: 6 },
+  });
 });
 
 test("applyTaskStatusCommandToEditor marks ancestor tasks in progress when a child starts", () => {
@@ -1046,11 +1100,13 @@ test("settleCurrentDay restores daily tasks even when no mainline items are comp
   ].join("\n"));
 });
 
-test("getTodayDateStr uses the configured timezone instead of UTC", () => {
-  const date = new Date("2026-04-22T16:30:00.000Z");
+test("getTodayDateStr uses the configured timezone with a 4 AM day boundary", () => {
+  const beforeShanghaiBoundary = new Date("2026-04-22T16:30:00.000Z");
+  const afterShanghaiBoundary = new Date("2026-04-22T20:30:00.000Z");
 
-  assert.equal(getTodayDateStr("Asia/Shanghai", date), "2026-04-23");
-  assert.equal(getTodayDateStr("UTC", date), "2026-04-22");
+  assert.equal(getTodayDateStr("Asia/Shanghai", beforeShanghaiBoundary), "2026-04-22");
+  assert.equal(getTodayDateStr("Asia/Shanghai", afterShanghaiBoundary), "2026-04-23");
+  assert.equal(getTodayDateStr("UTC", beforeShanghaiBoundary), "2026-04-22");
 });
 
 test("refreshCurrentDailySection writes cache and can run repeatedly in one day", async () => {
