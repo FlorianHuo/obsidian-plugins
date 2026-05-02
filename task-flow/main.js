@@ -926,7 +926,7 @@ function mergeCurrentDailyCacheEntries(existingEntries, incomingEntries) {
 }
 
 function renderCurrentDailyCacheContent(date, entries) {
-  const lines = [`# ${date}`, ""];
+  const lines = [];
 
   for (let index = 0; index < CURRENT_DAILY_CACHE_SECTION_NAMES.length; index += 1) {
     const sectionName = CURRENT_DAILY_CACHE_SECTION_NAMES[index];

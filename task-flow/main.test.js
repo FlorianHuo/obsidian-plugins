@@ -755,8 +755,6 @@ test("mergeCurrentDailyCacheContent appends by section without duplicating block
     "读三篇论文",
   ]));
   assert.equal(merged, [
-    "# 2026-04-28",
-    "",
     "## 日常",
     "",
     "- [x] 起床任务",

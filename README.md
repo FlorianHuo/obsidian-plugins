@@ -60,6 +60,7 @@ npm run dev
 - `Settle current day` now inserts new shop ledger rows directly above existing rows without leaving a blank gap
 - `Settle current day` now restores hidden completed `日常` tasks in `current.md` from `Rhythms/Daily`
 - `Alt+C` now saves an open `current.md` view before refresh so newly completed tasks are pruned in the same run
+- Cache files under `01-tracks/cache/` now omit the duplicate top-level date heading
 - `Mod+L` now inserts a new unchecked task on blank lines, and on an empty unchecked task line it clears the line back to blank
 - `Mod+/` now places a newly in-progress task above existing `[/]` siblings and unchecked `[ ]` siblings
 - `Mod+L` moves a newly completed task to the top of the current completed group, preserving the relative order of older `[x]` siblings
