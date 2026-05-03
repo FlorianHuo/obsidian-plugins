@@ -57,6 +57,7 @@ npm run dev
 - Add a repeatable `01-tracks/current.md` refresh action with the existing header icon and default `Alt+C` command: cache completed items to `01-tracks/cache/YYYY-MM-DD.md`, keep completed `日常` items out of `current.md` for the rest of the day, and prune completed `[x]` items out of `主线 / 支线`
 - Add `Preview current day settlement`, a read-only command that lists completed top-level `主线` items from today's cache without modifying `shop.md`
 - Add `Settle current day`, a manual command that records completed top-level `主线` items in `04-governance/shop.md` and updates the shop balance
+- Add `Settle unsettled day`, a manual picker for cache dates that still need `主线` ledger settlement or `日常` restore
 - `Settle current day` now inserts new shop ledger rows directly above existing rows without leaving a blank gap
 - `Settle current day` now restores hidden completed `日常` tasks in `current.md` from `Rhythms/Daily`
 - `Alt+C` now saves an open `current.md` view before refresh so newly completed tasks are pruned in the same run

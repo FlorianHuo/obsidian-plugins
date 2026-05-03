@@ -1,6 +1,7 @@
 let PluginClass = class {};
 let MarkdownViewClass = class {};
 let NoticeClass = class {};
+let SuggestModalClass = class {};
 let ChangeSetClass = null;
 let EditorSelectionClass = null;
 let EditorStateClass = null;
@@ -11,9 +12,14 @@ try {
     Plugin: PluginClass,
     MarkdownView: MarkdownViewClass,
     Notice: NoticeClass,
+    SuggestModal: SuggestModalClass,
   } = require("obsidian"));
 } catch (error) {
   // Allow local checks and tests outside Obsidian.
+}
+
+if (!SuggestModalClass) {
+  SuggestModalClass = class {};
 }
 
 try {
@@ -541,6 +547,21 @@ function getCurrentDailyCacheFilePath(date = getTodayDateStr()) {
   return `${CURRENT_DAILY_CACHE_FOLDER_PATH}/${date}.md`;
 }
 
+function getCurrentDailyCacheDateFromPath(path) {
+  if (typeof path !== "string") {
+    return null;
+  }
+
+  const escapedFolderPath = CURRENT_DAILY_CACHE_FOLDER_PATH.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
+  );
+  const match = path.match(
+    new RegExp(`^${escapedFolderPath}/(\\d{4}-\\d{2}-\\d{2})\\.md$`)
+  );
+  return match ? match[1] : null;
+}
+
 function normalizeDailyRhythmTask(line) {
   const bulletMatch = line.match(/^\s*-\s+(.*)$/);
   if (!bulletMatch) return null;
@@ -982,6 +1003,44 @@ function extractTaskTextFromTaskLine(line) {
 
   const taskText = taskMatch[1].trim();
   return taskText === "" ? null : taskText;
+}
+
+function extractCurrentDailyTaskTextKeys(currentContent) {
+  const lines = currentContent.split("\n");
+  const dailySection = findCurrentSectionRange(lines, "**日常**", "**主线**");
+  if (!dailySection) return null;
+
+  const keys = new Set();
+  for (const line of getSectionBodyText(lines, dailySection).split("\n")) {
+    const taskText = extractTaskTextFromTaskLine(line);
+    if (taskText !== null) {
+      keys.add(normalizeTaskTextKey(taskText));
+    }
+  }
+
+  return keys;
+}
+
+function countRestorableCachedDailyTasks(cacheContent, tracksContent, currentContent) {
+  const dailyTasks = extractRhythmsDailyTasks(tracksContent);
+  const currentDailyTaskKeys = extractCurrentDailyTaskTextKeys(currentContent);
+  if (dailyTasks === null || currentDailyTaskKeys === null) {
+    return 0;
+  }
+
+  const rhythmDailyTaskKeys = new Set(
+    dailyTasks.map((task) => normalizeTaskTextKey(task))
+  );
+  const cachedDailyTaskKeys = extractCachedCompletedDailyTaskTexts(cacheContent);
+  let count = 0;
+
+  for (const taskKey of cachedDailyTaskKeys) {
+    if (rhythmDailyTaskKeys.has(taskKey) && !currentDailyTaskKeys.has(taskKey)) {
+      count += 1;
+    }
+  }
+
+  return count;
 }
 
 function extractCompletedMainlineSettlementItems(cacheContent) {
@@ -2245,6 +2304,106 @@ async function readVaultFileIfExists(app, path) {
   return app.vault.read(file);
 }
 
+function listCurrentDailyCacheFiles(app) {
+  const filesByPath = new Map();
+
+  if (typeof app.vault.getFiles === "function") {
+    for (const file of app.vault.getFiles()) {
+      if (file?.path && getCurrentDailyCacheDateFromPath(file.path)) {
+        filesByPath.set(file.path, file);
+      }
+    }
+  }
+
+  const cacheFolder = app.vault.getAbstractFileByPath(CURRENT_DAILY_CACHE_FOLDER_PATH);
+  if (Array.isArray(cacheFolder?.children)) {
+    for (const file of cacheFolder.children) {
+      if (file?.path && getCurrentDailyCacheDateFromPath(file.path)) {
+        filesByPath.set(file.path, file);
+      }
+    }
+  }
+
+  return [...filesByPath.values()].sort((a, b) =>
+    getCurrentDailyCacheDateFromPath(b.path).localeCompare(
+      getCurrentDailyCacheDateFromPath(a.path)
+    )
+  );
+}
+
+function renderUnsettledSettlementOptionLabel(option) {
+  const reasons = [];
+  if (option.unsettledMainlineCount > 0) {
+    reasons.push(`${option.unsettledMainlineCount} 主线待入账`);
+  }
+  if (option.restorableDailyCount > 0) {
+    reasons.push(`${option.restorableDailyCount} 日常待恢复`);
+  }
+
+  return `${option.date} · ${reasons.join("，")}`;
+}
+
+async function listUnsettledCurrentDailyCacheSettlementOptions(app) {
+  const cacheFiles = listCurrentDailyCacheFiles(app);
+  if (cacheFiles.length === 0) {
+    return [];
+  }
+
+  const shopContent = await readVaultFileIfExists(app, SHOP_FILE_PATH);
+  const tracksContent = await readVaultFileIfExists(app, TRACKS_FILE_PATH);
+  const currentContent = await readVaultFileIfExists(app, CURRENT_TRACKS_FILE_PATH);
+  const candidates = [];
+  // Missing daily tasks are current.md state, so attach restore work to the newest matching cache date.
+  let latestRestorableDailyDate = null;
+
+  for (const file of cacheFiles) {
+    const date = getCurrentDailyCacheDateFromPath(file.path);
+    if (!date) continue;
+
+    const cacheContent = await app.vault.read(file);
+    const mainlineItems = extractCompletedMainlineSettlementItems(cacheContent);
+    const unsettledMainlineItems =
+      shopContent === null
+        ? mainlineItems
+        : filterUnsettledSettlementItems(mainlineItems, shopContent);
+    const restorableDailyCount =
+      tracksContent !== null && currentContent !== null
+        ? countRestorableCachedDailyTasks(cacheContent, tracksContent, currentContent)
+        : 0;
+
+    if (latestRestorableDailyDate === null && restorableDailyCount > 0) {
+      latestRestorableDailyDate = date;
+    }
+
+    candidates.push({
+      date,
+      path: file.path,
+      restorableDailyCount,
+      unsettledMainlineCount: unsettledMainlineItems.length,
+    });
+  }
+
+  const options = [];
+  for (const candidate of candidates) {
+    const restorableDailyCount =
+      candidate.date === latestRestorableDailyDate
+        ? candidate.restorableDailyCount
+        : 0;
+    if (candidate.unsettledMainlineCount === 0 && restorableDailyCount === 0) {
+      continue;
+    }
+
+    const option = {
+      ...candidate,
+      restorableDailyCount,
+    };
+    option.label = renderUnsettledSettlementOptionLabel(option);
+    options.push(option);
+  }
+
+  return options.sort((a, b) => b.date.localeCompare(a.date));
+}
+
 function getOpenMarkdownViewForFile(app, path) {
   const leaves = getMarkdownLeaves(app);
   const leaf = leaves.find((candidate) => candidate?.view?.file?.path === path);
@@ -2482,6 +2641,62 @@ async function settleCurrentDay(app, date = getTodayDateStr()) {
   return restoreResult.changed;
 }
 
+class UnsettledSettlementDateModal extends SuggestModalClass {
+  constructor(app, options, onChoose) {
+    super(app);
+    this.options = options;
+    this.onChoose = onChoose;
+
+    if (typeof this.setPlaceholder === "function") {
+      this.setPlaceholder("Choose an unsettled current.md cache date");
+    }
+  }
+
+  getSuggestions(query) {
+    const normalizedQuery = (query || "").trim().toLowerCase();
+    if (normalizedQuery === "") {
+      return this.options;
+    }
+
+    return this.options.filter((option) =>
+      option.label.toLowerCase().includes(normalizedQuery)
+    );
+  }
+
+  renderSuggestion(option, el) {
+    if (typeof el.createEl === "function") {
+      el.createEl("div", { text: option.label });
+      el.createEl("small", { text: option.path });
+      return;
+    }
+
+    el.textContent = option.label;
+  }
+
+  onChooseSuggestion(option) {
+    void this.onChoose(option);
+  }
+}
+
+async function settleUnsettledCurrentDailyCacheDay(app) {
+  const options = await listUnsettledCurrentDailyCacheSettlementOptions(app);
+  if (options.length === 0) {
+    new NoticeClass("Settle unsettled day: no unsettled cache dates.");
+    return [];
+  }
+
+  const modal = new UnsettledSettlementDateModal(app, options, (option) =>
+    settleCurrentDay(app, option.date)
+  );
+  if (typeof modal.open !== "function") {
+    new NoticeClass("Settle unsettled day: date picker is unavailable.");
+    return options;
+  }
+
+  modal.open();
+  return options;
+}
+
 function runTaskStatusCommand(app, statusChar, isToggle) {
   const editor = ensureEditableMarkdownEditor(app);
   if (!editor) {
@@ -2683,6 +2898,12 @@ class TaskStatusShortcutsPlugin extends PluginClass {
       name: "Settle current day",
       callback: () => void settleCurrentDay(this.app),
     });
+
+    this.addCommand({
+      id: "settle-unsettled-current-daily-cache-day",
+      name: "Settle unsettled day",
+      callback: () => void settleUnsettledCurrentDailyCacheDay(this.app),
+    });
   }
 }
 
@@ -2706,9 +2927,12 @@ module.exports.extractCurrentRefreshCacheEntries = extractCurrentRefreshCacheEnt
 module.exports.addDailyRefreshHeaderAction = addDailyRefreshHeaderAction;
 module.exports.completeDescendantTasksInLineArray = completeDescendantTasksInLineArray;
 module.exports.getCurrentDailyCacheFilePath = getCurrentDailyCacheFilePath;
+module.exports.getCurrentDailyCacheDateFromPath = getCurrentDailyCacheDateFromPath;
 module.exports.getMarkdownLeaves = getMarkdownLeaves;
 module.exports.getTodayDateStr = getTodayDateStr;
 module.exports.isCurrentTracksFile = isCurrentTracksFile;
+module.exports.listCurrentDailyCacheFiles = listCurrentDailyCacheFiles;
+module.exports.listUnsettledCurrentDailyCacheSettlementOptions = listUnsettledCurrentDailyCacheSettlementOptions;
 module.exports.markAncestorTasksInLineArray = markAncestorTasksInLineArray;
 module.exports.mergeCurrentDailyCacheContent = mergeCurrentDailyCacheContent;
 module.exports.normalizeStaleInProgressParentTasksInLineArray = normalizeStaleInProgressParentTasksInLineArray;
@@ -2724,6 +2948,7 @@ module.exports.restoreCurrentDailySection = restoreCurrentDailySection;
 module.exports.runCurrentDailyRefresh = runCurrentDailyRefresh;
 module.exports.setTaskStatus = setTaskStatus;
 module.exports.settleCurrentDay = settleCurrentDay;
+module.exports.settleUnsettledCurrentDailyCacheDay = settleUnsettledCurrentDailyCacheDay;
 module.exports.syncDailyRefreshHeaderActions = syncDailyRefreshHeaderActions;
 module.exports.sortCurrentFile = sortCurrentFile;
 module.exports.sortEditorTaskRegions = sortEditorTaskRegions;

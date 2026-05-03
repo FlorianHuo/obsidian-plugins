@@ -15,8 +15,10 @@ const {
   extractCurrentRefreshCacheEntries,
   extractRhythmsDailyTasks,
   getCurrentDailyCacheFilePath,
+  getCurrentDailyCacheDateFromPath,
   getTodayDateStr,
   isCurrentTracksFile,
+  listUnsettledCurrentDailyCacheSettlementOptions,
   markAncestorTasksInLineArray,
   mergeCurrentDailyCacheContent,
   normalizeStaleInProgressParentTasksInLineArray,
@@ -1098,6 +1100,138 @@ test("settleCurrentDay restores daily tasks even when no mainline items are comp
     "**支线**",
     "",
   ].join("\n"));
+});
+
+test("getCurrentDailyCacheDateFromPath only matches current.md cache files", () => {
+  assert.equal(
+    getCurrentDailyCacheDateFromPath("01-tracks/cache/2026-05-02.md"),
+    "2026-05-02"
+  );
+  assert.equal(getCurrentDailyCacheDateFromPath("01-tracks/cache/notes.md"), null);
+  assert.equal(getCurrentDailyCacheDateFromPath("journal/2026-05-02.md"), null);
+});
+
+test("listUnsettledCurrentDailyCacheSettlementOptions lists dates needing ledger or restore", async () => {
+  const fileContents = new Map([
+    [
+      "01-tracks/tracks.md",
+      [
+        "## Rhythms",
+        "",
+        "**Daily**",
+        "- 起床任务",
+        "- 读三篇论文",
+        "",
+      ].join("\n"),
+    ],
+    [
+      "01-tracks/current.md",
+      [
+        "**日常**",
+        "",
+        "- [ ] 读三篇论文",
+        "",
+        "**主线**",
+        "",
+        "**支线**",
+        "",
+      ].join("\n"),
+    ],
+    [
+      "01-tracks/cache/2026-05-01.md",
+      [
+        "## 日常",
+        "",
+        "- [x] 起床任务",
+        "",
+        "## 主线",
+        "",
+        "- [x] 已入账主线",
+        "",
+        "## 支线",
+        "",
+      ].join("\n"),
+    ],
+    [
+      "01-tracks/cache/2026-05-02.md",
+      [
+        "## 日常",
+        "",
+        "- [x] 起床任务",
+        "",
+        "## 主线",
+        "",
+        "- [x] 新主线",
+        "- [x] 已入账主线",
+        "",
+        "## 支线",
+        "",
+      ].join("\n"),
+    ],
+    [
+      "01-tracks/cache/2026-05-03.md",
+      [
+        "## 日常",
+        "",
+        "- [x] 起床任务",
+        "",
+        "## 主线",
+        "",
+        "## 支线",
+        "",
+      ].join("\n"),
+    ],
+    [
+      "04-governance/shop.md",
+      [
+        "**余额：-276 | 当前连续：0 天 | 最长记录：8 天**",
+        "",
+        "**流水**",
+        "",
+        "**斯大林格勒（2026-04-08 起）**",
+        "2026-05-01 | +3 | 完成主线：已入账主线 | 余额 -276",
+      ].join("\n"),
+    ],
+  ]);
+  const app = {
+    vault: {
+      getFiles() {
+        return [...fileContents.keys()].map((path) => ({ path }));
+      },
+      getAbstractFileByPath(path) {
+        return fileContents.has(path) ? { path } : null;
+      },
+      async read(file) {
+        return fileContents.get(file.path);
+      },
+    },
+  };
+
+  const options = await listUnsettledCurrentDailyCacheSettlementOptions(app);
+
+  assert.deepEqual(
+    options.map((option) => ({
+      date: option.date,
+      restorableDailyCount: option.restorableDailyCount,
+      unsettledMainlineCount: option.unsettledMainlineCount,
+    })),
+    [
+      {
+        date: "2026-05-03",
+        restorableDailyCount: 1,
+        unsettledMainlineCount: 0,
+      },
+      {
+        date: "2026-05-02",
+        restorableDailyCount: 0,
+        unsettledMainlineCount: 1,
+      },
+    ]
+  );
+  assert.deepEqual(
+    options.map((option) => option.label),
+    ["2026-05-03 · 1 日常待恢复", "2026-05-02 · 1 主线待入账"]
+  );
 });
 
 test("getTodayDateStr uses the configured timezone with a 4 AM day boundary", () => {
