@@ -511,7 +511,13 @@ const DAILY_TIME_ZONE = "Asia/Shanghai";
 const DAY_BOUNDARY_HOUR = 4;
 const DAILY_REFRESH_ICON = "refresh-cw";
 const DAILY_HEADER_ACTION_CLASS = "task-flow-refresh-current-daily";
-const CURRENT_DAILY_CACHE_SECTION_NAMES = ["日常", "主线", "支线"];
+const NEXT_CURRENT_BANNER_CANARY_CLASS = "task-flow-next-current-banner";
+const NEXT_CURRENT_TASK_EMPTY_TEXT = "Next → set / in current";
+const CURRENT_DAILY_HEADING = "**日常**";
+const CURRENT_DEADLINE_HEADING = "**限期**";
+const CURRENT_MAINLINE_HEADING = "**主线**";
+const CURRENT_SIDE_HEADING = "**支线**";
+const CURRENT_DAILY_CACHE_SECTION_NAMES = ["日常", "限期", "主线", "支线"];
 
 function preserveTrailingNewlines(sourceText, updatedText) {
   const sourceTrailingNewlineCount = sourceText.match(/\n*$/)?.[0].length ?? 0;
@@ -643,7 +649,13 @@ function findCurrentSectionRange(lines, headingText, nextHeadingText = null) {
   if (headingIndex === -1) return null;
 
   let nextHeadingIndex = lines.length;
-  if (nextHeadingText !== null) {
+  if (Array.isArray(nextHeadingText)) {
+    const nextHeadingTexts = new Set(nextHeadingText);
+    nextHeadingIndex = lines.findIndex(
+      (line, index) => index > headingIndex && nextHeadingTexts.has(line.trim())
+    );
+    if (nextHeadingIndex === -1) return null;
+  } else if (nextHeadingText !== null) {
     nextHeadingIndex = lines.findIndex(
       (line, index) => index > headingIndex && line.trim() === nextHeadingText
     );
@@ -673,7 +685,10 @@ function replaceCurrentSectionBody(lines, sectionRange, newBodyText) {
 }
 
 function replaceCurrentDailySectionLines(lines, dailyTasks) {
-  const dailySection = findCurrentSectionRange(lines, "**日常**", "**主线**");
+  const dailySection = findCurrentSectionRange(lines, CURRENT_DAILY_HEADING, [
+    CURRENT_DEADLINE_HEADING,
+    CURRENT_MAINLINE_HEADING,
+  ]);
   if (!dailySection) return null;
 
   return replaceCurrentSectionBody(
@@ -712,14 +727,21 @@ function buildCurrentRefreshLines(currentContent, dailyTasks, options = {}) {
   const withDailyReset = replaceCurrentDailySectionLines(lines, visibleDailyTasks);
   if (!withDailyReset) return null;
 
-  const withMainCleaned = cleanCarryoverSection(
+  const withDeadlineCleaned = cleanCarryoverSection(
     withDailyReset,
-    "**主线**",
-    "**支线**"
+    CURRENT_DEADLINE_HEADING,
+    CURRENT_MAINLINE_HEADING
+  );
+  const beforeMainClean = withDeadlineCleaned || withDailyReset;
+
+  const withMainCleaned = cleanCarryoverSection(
+    beforeMainClean,
+    CURRENT_MAINLINE_HEADING,
+    CURRENT_SIDE_HEADING
   );
   if (!withMainCleaned) return null;
 
-  const withSideCleaned = cleanCarryoverSection(withMainCleaned, "**支线**");
+  const withSideCleaned = cleanCarryoverSection(withMainCleaned, CURRENT_SIDE_HEADING);
   if (!withSideCleaned) return null;
 
   return withSideCleaned;
@@ -853,9 +875,22 @@ function extractCurrentRefreshCacheEntries(currentContent) {
   const lines = currentContent.split("\n");
   const entries = createEmptyCurrentDailyCacheEntries();
   const sections = [
-    { cacheSection: "日常", heading: "**日常**", nextHeading: "**主线**" },
-    { cacheSection: "主线", heading: "**主线**", nextHeading: "**支线**" },
-    { cacheSection: "支线", heading: "**支线**", nextHeading: null },
+    {
+      cacheSection: "日常",
+      heading: CURRENT_DAILY_HEADING,
+      nextHeading: [CURRENT_DEADLINE_HEADING, CURRENT_MAINLINE_HEADING],
+    },
+    {
+      cacheSection: "限期",
+      heading: CURRENT_DEADLINE_HEADING,
+      nextHeading: CURRENT_MAINLINE_HEADING,
+    },
+    {
+      cacheSection: "主线",
+      heading: CURRENT_MAINLINE_HEADING,
+      nextHeading: CURRENT_SIDE_HEADING,
+    },
+    { cacheSection: "支线", heading: CURRENT_SIDE_HEADING, nextHeading: null },
   ];
 
   for (const section of sections) {
@@ -1005,9 +1040,78 @@ function extractTaskTextFromTaskLine(line) {
   return taskText === "" ? null : taskText;
 }
 
+function extractNextTaskTextFromTaskLine(line) {
+  const taskMatch = line.match(/^\s*-\s*\[[^\]]?\]\s*(.*)$/);
+  if (!taskMatch) return "";
+
+  return taskMatch[1].trim();
+}
+
+function findFirstInProgressDescendantLine(lines, parentLineNumber) {
+  const parentTask = matchTaskLine(lines[parentLineNumber]);
+  if (!parentTask) return null;
+
+  const parentIndentLength = parentTask[1].length;
+  const subtreeEndLine = findTaskSubtreeEndInLines(lines, parentLineNumber);
+
+  for (let lineNumber = parentLineNumber + 1; lineNumber <= subtreeEndLine; lineNumber += 1) {
+    const taskMatch = matchTaskLine(lines[lineNumber]);
+    if (
+      taskMatch &&
+      taskMatch[1].length > parentIndentLength &&
+      taskMatch[2] === "/"
+    ) {
+      return lineNumber;
+    }
+  }
+
+  return null;
+}
+
+function findNextInProgressTaskInCurrentContent(currentContent) {
+  if (typeof currentContent !== "string") {
+    return null;
+  }
+
+  const lines = currentContent.split("\n");
+  let targetLineNumber = null;
+
+  for (let lineNumber = 0; lineNumber < lines.length; lineNumber += 1) {
+    const taskMatch = matchTaskLine(lines[lineNumber]);
+    if (taskMatch && taskMatch[2] === "/") {
+      targetLineNumber = lineNumber;
+      break;
+    }
+  }
+
+  if (targetLineNumber === null) {
+    return null;
+  }
+
+  while (true) {
+    const descendantLineNumber = findFirstInProgressDescendantLine(
+      lines,
+      targetLineNumber
+    );
+    if (descendantLineNumber === null) {
+      break;
+    }
+
+    targetLineNumber = descendantLineNumber;
+  }
+
+  return {
+    text: extractNextTaskTextFromTaskLine(lines[targetLineNumber]),
+    lineNumber: targetLineNumber,
+  };
+}
+
 function extractCurrentDailyTaskTextKeys(currentContent) {
   const lines = currentContent.split("\n");
-  const dailySection = findCurrentSectionRange(lines, "**日常**", "**主线**");
+  const dailySection = findCurrentSectionRange(lines, CURRENT_DAILY_HEADING, [
+    CURRENT_DEADLINE_HEADING,
+    CURRENT_MAINLINE_HEADING,
+  ]);
   if (!dailySection) return null;
 
   const keys = new Set();
@@ -2807,6 +2911,301 @@ function registerDailyRefreshHeaderActions(plugin) {
   });
 }
 
+function getCurrentTracksFile(app) {
+  if (typeof app?.vault?.getAbstractFileByPath !== "function") {
+    return null;
+  }
+
+  return app.vault.getAbstractFileByPath(CURRENT_TRACKS_FILE_PATH);
+}
+
+async function readCurrentTracksContent(app) {
+  const file = getCurrentTracksFile(app);
+  if (!file) {
+    return null;
+  }
+
+  if (typeof app.vault.cachedRead === "function") {
+    return app.vault.cachedRead(file);
+  }
+
+  if (typeof app.vault.read === "function") {
+    return app.vault.read(file);
+  }
+
+  return null;
+}
+
+function renderNextCurrentTaskBannerText(nextTask) {
+  return nextTask ? `Next → ${nextTask.text}` : NEXT_CURRENT_TASK_EMPTY_TEXT;
+}
+
+function setNextCurrentTaskBannerText(element, nextTask) {
+  if (!element) {
+    return;
+  }
+
+  const text = renderNextCurrentTaskBannerText(nextTask);
+  element.textContent = text;
+  element.title = text;
+  element.classList?.add(NEXT_CURRENT_BANNER_CANARY_CLASS);
+
+  if (typeof element.setAttribute === "function") {
+    element.setAttribute("aria-label", text);
+    element.setAttribute("data-task-flow-next", "current-md");
+  }
+}
+
+async function openCurrentTracksFile(app) {
+  const file = getCurrentTracksFile(app);
+  if (!file || !app?.workspace) {
+    return false;
+  }
+
+  if (typeof app.workspace.getLeaf === "function") {
+    const leaf = app.workspace.getLeaf(false);
+    if (typeof leaf?.openFile === "function") {
+      await leaf.openFile(file);
+      return true;
+    }
+  }
+
+  if (typeof app.workspace.openLinkText === "function") {
+    await app.workspace.openLinkText(CURRENT_TRACKS_FILE_PATH, "", false);
+    return true;
+  }
+
+  return false;
+}
+
+function getCurrentTracksMarkdownView(app) {
+  const activeView = getActiveMarkdownView(app);
+  if (activeView?.file?.path === CURRENT_TRACKS_FILE_PATH) {
+    return activeView;
+  }
+
+  return getOpenMarkdownViewForFile(app, CURRENT_TRACKS_FILE_PATH);
+}
+
+function moveCursorToCurrentTracksLine(app, lineNumber) {
+  const view = getCurrentTracksMarkdownView(app);
+  if (!view) {
+    return false;
+  }
+
+  if (typeof view.getMode === "function" && view.getMode() === "preview") {
+    app.commands?.executeCommandById?.("markdown:toggle-preview");
+  }
+
+  app.commands?.executeCommandById?.("editor:focus");
+
+  const editor = view.editor || getActiveMarkdownEditor(app);
+  if (typeof editor?.setCursor !== "function") {
+    return false;
+  }
+
+  const position = { line: lineNumber, ch: 0 };
+  editor.setCursor(position);
+  if (typeof editor.scrollIntoView === "function") {
+    editor.scrollIntoView({ from: position, to: position }, true);
+  }
+
+  return true;
+}
+
+async function jumpToNextCurrentTask(app) {
+  const currentContent = await readCurrentTracksContent(app);
+  if (currentContent === null) {
+    new NoticeClass("Missing 01-tracks/current.md for Next.");
+    return null;
+  }
+
+  const nextTask = findNextInProgressTaskInCurrentContent(currentContent);
+  if (!nextTask) {
+    new NoticeClass(NEXT_CURRENT_TASK_EMPTY_TEXT);
+    return null;
+  }
+
+  const opened = await openCurrentTracksFile(app);
+  if (!opened) {
+    new NoticeClass("Unable to open 01-tracks/current.md.");
+    return nextTask;
+  }
+
+  if (!moveCursorToCurrentTracksLine(app, nextTask.lineNumber)) {
+    new NoticeClass("Opened current.md, but could not move the cursor.");
+  }
+
+  return nextTask;
+}
+
+function registerPluginEvent(plugin, eventRef) {
+  if (eventRef && typeof plugin?.registerEvent === "function") {
+    plugin.registerEvent(eventRef);
+  }
+}
+
+function ensureNextCurrentTaskBannerMap(plugin) {
+  if (!plugin.nextCurrentTaskBanners) {
+    plugin.nextCurrentTaskBanners = new Map();
+  }
+
+  return plugin.nextCurrentTaskBanners;
+}
+
+function getNextCurrentTaskBannerParent(leaf) {
+  const view = leaf?.view;
+  const parent = view?.contentEl || view?.containerEl;
+  if (!parent || typeof parent.insertBefore !== "function") {
+    return null;
+  }
+
+  return parent;
+}
+
+function createNextCurrentTaskBannerElement(plugin, leaf, nextTask) {
+  const parent = getNextCurrentTaskBannerParent(leaf);
+  const ownerDocument = parent?.ownerDocument || globalThis.document;
+  if (typeof ownerDocument?.createElement !== "function") {
+    return null;
+  }
+
+  const banner = ownerDocument.createElement("button");
+  if (typeof banner.setAttribute === "function") {
+    banner.setAttribute("type", "button");
+  }
+
+  setNextCurrentTaskBannerText(banner, nextTask);
+
+  const jump = () => void jumpToNextCurrentTask(plugin.app);
+  if (typeof plugin.registerDomEvent === "function") {
+    plugin.registerDomEvent(banner, "click", jump);
+  } else if (typeof banner.addEventListener === "function") {
+    banner.addEventListener("click", jump);
+  }
+
+  return banner;
+}
+
+function addOrUpdateNextCurrentTaskBanner(plugin, leaf, nextTask) {
+  const parent = getNextCurrentTaskBannerParent(leaf);
+  if (!parent) {
+    removeNextCurrentTaskBanner(plugin, leaf);
+    return null;
+  }
+
+  const banners = ensureNextCurrentTaskBannerMap(plugin);
+  let banner = banners.get(leaf);
+  if (!banner || !banner.isConnected) {
+    if (banner?.remove) {
+      banner.remove();
+    }
+    banner = createNextCurrentTaskBannerElement(plugin, leaf, nextTask);
+    if (!banner) {
+      banners.delete(leaf);
+      return null;
+    }
+    banners.set(leaf, banner);
+  }
+
+  setNextCurrentTaskBannerText(banner, nextTask);
+  if (banner.parentNode !== parent || parent.firstChild !== banner) {
+    parent.insertBefore(banner, parent.firstChild || null);
+  }
+
+  return banner;
+}
+
+function removeNextCurrentTaskBanner(plugin, leaf) {
+  const banner = plugin?.nextCurrentTaskBanners?.get(leaf);
+  if (banner?.remove) {
+    banner.remove();
+  }
+  plugin?.nextCurrentTaskBanners?.delete(leaf);
+}
+
+function syncNextCurrentTaskBanners(plugin, nextTask) {
+  const banners = ensureNextCurrentTaskBannerMap(plugin);
+  const leaves = getMarkdownLeaves(plugin.app);
+  const activeLeaves = new Set(leaves);
+
+  for (const [leaf] of banners) {
+    if (!activeLeaves.has(leaf) || !isCurrentTracksFile(leaf?.view?.file)) {
+      removeNextCurrentTaskBanner(plugin, leaf);
+    }
+  }
+
+  for (const leaf of leaves) {
+    if (isCurrentTracksFile(leaf?.view?.file)) {
+      addOrUpdateNextCurrentTaskBanner(plugin, leaf, nextTask);
+    }
+  }
+}
+
+async function updateNextCurrentTaskBanners(plugin) {
+  if (!plugin) {
+    return null;
+  }
+
+  const updateId = (plugin.nextCurrentTaskBannerUpdateId || 0) + 1;
+  plugin.nextCurrentTaskBannerUpdateId = updateId;
+
+  let nextTask = null;
+  try {
+    const currentContent = await readCurrentTracksContent(plugin.app);
+    nextTask = findNextInProgressTaskInCurrentContent(currentContent);
+  } catch (error) {
+    nextTask = null;
+  }
+
+  if (plugin.nextCurrentTaskBannerUpdateId !== updateId) {
+    return nextTask;
+  }
+
+  plugin.nextCurrentTaskProjection = nextTask;
+  syncNextCurrentTaskBanners(plugin, nextTask);
+  return nextTask;
+}
+
+function registerNextCurrentTaskBanners(plugin) {
+  if (!plugin?.app?.workspace) {
+    return;
+  }
+
+  ensureNextCurrentTaskBannerMap(plugin);
+  const update = () => void updateNextCurrentTaskBanners(plugin);
+
+  if (typeof plugin.app.workspace.onLayoutReady === "function") {
+    plugin.app.workspace.onLayoutReady(update);
+  } else {
+    update();
+  }
+
+  registerPluginEvent(plugin, plugin.app.workspace.on?.("file-open", update));
+  registerPluginEvent(
+    plugin,
+    plugin.app.workspace.on?.("active-leaf-change", update)
+  );
+  registerPluginEvent(plugin, plugin.app.workspace.on?.("layout-change", update));
+  registerPluginEvent(
+    plugin,
+    plugin.app?.vault?.on?.("modify", (file) => {
+      if (isCurrentTracksFile(file)) {
+        update();
+      }
+    })
+  );
+
+  if (typeof plugin.register === "function") {
+    plugin.register(() => {
+      for (const [leaf] of ensureNextCurrentTaskBannerMap(plugin)) {
+        removeNextCurrentTaskBanner(plugin, leaf);
+      }
+      plugin.nextCurrentTaskProjection = null;
+    });
+  }
+}
+
 function runCurrentDailyRefresh(plugin) {
   return refreshCurrentDailySection(
     plugin.app,
@@ -2826,6 +3225,7 @@ class TaskStatusShortcutsPlugin extends PluginClass {
     }
 
     registerDailyRefreshHeaderActions(this);
+    registerNextCurrentTaskBanners(this);
 
     this.addCommand({
       id: "set-task-status-in-progress",
@@ -2873,6 +3273,12 @@ class TaskStatusShortcutsPlugin extends PluginClass {
       id: "sort-current-file",
       name: "Sort tasks in current file",
       callback: () => void sortCurrentFile(this.app),
+    });
+
+    this.addCommand({
+      id: "jump-to-next-current-task",
+      name: "Jump to Next current task",
+      callback: () => void jumpToNextCurrentTask(this.app),
     });
 
     this.addCommand({
@@ -2924,6 +3330,7 @@ module.exports.extractRhythmsDailyTasks = extractRhythmsDailyTasks;
 module.exports.extractCachedCompletedDailyTaskTexts = extractCachedCompletedDailyTaskTexts;
 module.exports.extractCompletedMainlineSettlementItems = extractCompletedMainlineSettlementItems;
 module.exports.extractCurrentRefreshCacheEntries = extractCurrentRefreshCacheEntries;
+module.exports.findNextInProgressTaskInCurrentContent = findNextInProgressTaskInCurrentContent;
 module.exports.addDailyRefreshHeaderAction = addDailyRefreshHeaderAction;
 module.exports.completeDescendantTasksInLineArray = completeDescendantTasksInLineArray;
 module.exports.getCurrentDailyCacheFilePath = getCurrentDailyCacheFilePath;
@@ -2931,6 +3338,7 @@ module.exports.getCurrentDailyCacheDateFromPath = getCurrentDailyCacheDateFromPa
 module.exports.getMarkdownLeaves = getMarkdownLeaves;
 module.exports.getTodayDateStr = getTodayDateStr;
 module.exports.isCurrentTracksFile = isCurrentTracksFile;
+module.exports.jumpToNextCurrentTask = jumpToNextCurrentTask;
 module.exports.listCurrentDailyCacheFiles = listCurrentDailyCacheFiles;
 module.exports.listUnsettledCurrentDailyCacheSettlementOptions = listUnsettledCurrentDailyCacheSettlementOptions;
 module.exports.markAncestorTasksInLineArray = markAncestorTasksInLineArray;
@@ -2940,12 +3348,15 @@ module.exports.parseCurrentDailyCacheEntries = parseCurrentDailyCacheEntries;
 module.exports.previewCurrentDaySettlement = previewCurrentDaySettlement;
 module.exports.registerDailyRefreshHeaderActions = registerDailyRefreshHeaderActions;
 module.exports.removeDailyRefreshHeaderAction = removeDailyRefreshHeaderAction;
+module.exports.removeNextCurrentTaskBanner = removeNextCurrentTaskBanner;
 module.exports.refreshCurrentDailySection = refreshCurrentDailySection;
+module.exports.renderNextCurrentTaskBannerText = renderNextCurrentTaskBannerText;
 module.exports.renderCurrentDaySettlementPreview = renderCurrentDaySettlementPreview;
 module.exports.renderCurrentDailyCacheContent = renderCurrentDailyCacheContent;
 module.exports.replaceCurrentDailySection = replaceCurrentDailySection;
 module.exports.restoreCurrentDailySection = restoreCurrentDailySection;
 module.exports.runCurrentDailyRefresh = runCurrentDailyRefresh;
+module.exports.setNextCurrentTaskBannerText = setNextCurrentTaskBannerText;
 module.exports.setTaskStatus = setTaskStatus;
 module.exports.settleCurrentDay = settleCurrentDay;
 module.exports.settleUnsettledCurrentDailyCacheDay = settleUnsettledCurrentDailyCacheDay;

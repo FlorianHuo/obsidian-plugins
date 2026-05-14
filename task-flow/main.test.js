@@ -1,5 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const {
   applyStatusToLine,
@@ -13,6 +15,7 @@ const {
   extractCachedCompletedDailyTaskTexts,
   extractCompletedMainlineSettlementItems,
   extractCurrentRefreshCacheEntries,
+  findNextInProgressTaskInCurrentContent,
   extractRhythmsDailyTasks,
   getCurrentDailyCacheFilePath,
   getCurrentDailyCacheDateFromPath,
@@ -27,7 +30,9 @@ const {
   refreshCurrentDailySection,
   replaceCurrentDailySection,
   removeDailyRefreshHeaderAction,
+  renderNextCurrentTaskBannerText,
   settleCurrentDay,
+  setNextCurrentTaskBannerText,
   syncDailyRefreshHeaderActions,
   setTaskStatus,
   toggleStatusOnLine,
@@ -107,6 +112,124 @@ function createMockLeaf(filePath) {
     callbacks,
   };
 }
+
+test("findNextInProgressTaskInCurrentContent returns the only top-level in-progress task", () => {
+  const currentContent = [
+    "**日常**",
+    "",
+    "- [ ] daily",
+    "",
+    "**主线**",
+    "",
+    "- [/] ship Next projection",
+    "",
+    "**支线**",
+    "",
+    "- [ ] side",
+  ].join("\n");
+
+  assert.deepEqual(findNextInProgressTaskInCurrentContent(currentContent), {
+    text: "ship Next projection",
+    lineNumber: 6,
+  });
+});
+
+test("findNextInProgressTaskInCurrentContent drills to the deepest first in-progress descendant", () => {
+  const currentContent = [
+    "- [/] parent",
+    "  - [ ] ignored todo child",
+    "  - [/] child",
+    "    - [/] grandchild",
+    "      - [ ] ignored todo grandchild",
+    "    - [/] later sibling grandchild",
+    "- [/] later root",
+  ].join("\n");
+
+  assert.deepEqual(findNextInProgressTaskInCurrentContent(currentContent), {
+    text: "grandchild",
+    lineNumber: 3,
+  });
+});
+
+test("findNextInProgressTaskInCurrentContent ignores unchecked and completed tasks", () => {
+  const currentContent = [
+    "- [ ] unchecked",
+    "  - [ ] unchecked child",
+    "- [x] completed",
+    "  - [x] completed child",
+    "- [/] active",
+  ].join("\n");
+
+  assert.deepEqual(findNextInProgressTaskInCurrentContent(currentContent), {
+    text: "active",
+    lineNumber: 4,
+  });
+});
+
+test("findNextInProgressTaskInCurrentContent returns an earlier in-progress task without in-progress children", () => {
+  const currentContent = [
+    "- [/] first active",
+    "  - [ ] first todo child",
+    "- [/] second active",
+    "  - [/] second child",
+  ].join("\n");
+
+  assert.deepEqual(findNextInProgressTaskInCurrentContent(currentContent), {
+    text: "first active",
+    lineNumber: 0,
+  });
+});
+
+test("findNextInProgressTaskInCurrentContent returns null when there is no in-progress task", () => {
+  const currentContent = [
+    "- [ ] unchecked",
+    "  - [x] completed child",
+    "- [x] completed",
+  ].join("\n");
+
+  assert.equal(findNextInProgressTaskInCurrentContent(currentContent), null);
+});
+
+test("renderNextCurrentTaskBannerText renders current Next banner text", () => {
+  assert.equal(
+    renderNextCurrentTaskBannerText({ text: "ship Next projection" }),
+    "Next → ship Next projection"
+  );
+  assert.equal(renderNextCurrentTaskBannerText(null), "Next → set / in current");
+});
+
+test("setNextCurrentTaskBannerText updates a DOM-like element", () => {
+  const classes = new Set();
+  const attributes = new Map();
+  const element = {
+    textContent: "",
+    title: "",
+    classList: {
+      add(value) {
+        classes.add(value);
+      },
+    },
+    setAttribute(name, value) {
+      attributes.set(name, value);
+    },
+  };
+
+  setNextCurrentTaskBannerText(element, { text: "draft banner" });
+
+  assert.equal(element.textContent, "Next → draft banner");
+  assert.equal(element.title, "Next → draft banner");
+  assert.equal(attributes.get("aria-label"), "Next → draft banner");
+  assert.equal(attributes.get("data-task-flow-next"), "current-md");
+  assert.equal(classes.has("task-flow-next-current-banner"), true);
+});
+
+test("styles the Next current banner as centered bold text", () => {
+  const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
+  const bannerRule = css.match(/\.task-flow-next-current-banner\s*\{[^}]+\}/)?.[0] ?? "";
+
+  assert.match(bannerRule, /text-align:\s*center;/);
+  assert.match(bannerRule, /font-weight:\s*600;/);
+});
 
 test("applyStatusToLine converts supported line shapes into in-progress tasks", () => {
   const cases = [
@@ -654,6 +777,46 @@ test("replaceCurrentDailySection only rewrites the 日常 block", () => {
   ].join("\n"));
 });
 
+test("replaceCurrentDailySection preserves the 限期 block between 日常 and 主线", () => {
+  const currentContent = [
+    "**日常**",
+    "",
+    "- [x] 起床任务",
+    "",
+    "**限期**",
+    "",
+    "- [/] 休学流程：系统提交申请",
+    "",
+    "**主线**",
+    "",
+    "- [ ] 暑研套辞",
+    "",
+    "**支线**",
+    "",
+    "- [ ] 给宿舍打扫卫生",
+  ].join("\n");
+
+  const updated = replaceCurrentDailySection(currentContent, ["口语对话"]);
+
+  assert.equal(updated, [
+    "**日常**",
+    "",
+    "- [ ] 口语对话",
+    "",
+    "**限期**",
+    "",
+    "- [/] 休学流程：系统提交申请",
+    "",
+    "**主线**",
+    "",
+    "- [ ] 暑研套辞",
+    "",
+    "**支线**",
+    "",
+    "- [ ] 给宿舍打扫卫生",
+  ].join("\n"));
+});
+
 test("buildRefreshedCurrentContent rebuilds 日常 from Rhythms/Daily", () => {
   const currentContent = [
     "**日常**",
@@ -706,6 +869,61 @@ test("buildRefreshedCurrentContent rebuilds 日常 from Rhythms/Daily", () => {
       "",
       "- [ ] keep side root",
       "  - [/] keep side child",
+    ].join("\n")
+  );
+});
+
+test("buildRefreshedCurrentContent preserves and cleans the 限期 block", () => {
+  const currentContent = [
+    "**日常**",
+    "",
+    "- [x] old daily",
+    "",
+    "**限期**",
+    "",
+    "- [x] drop done deadline",
+    "- [/] keep deadline parent",
+    "  - [x] drop done deadline child",
+    "  - [ ] keep deadline child",
+    "",
+    "**主线**",
+    "",
+    "- [x] drop done mainline",
+    "- [ ] keep mainline",
+    "",
+    "**支线**",
+    "",
+    "- [x] drop done side",
+    "- [ ] keep side",
+  ].join("\n");
+  const tracksContent = [
+    "## Rhythms",
+    "",
+    "**Daily**",
+    "- 起床任务",
+    "",
+    "**Weekly**",
+  ].join("\n");
+
+  assert.equal(
+    buildRefreshedCurrentContent(currentContent, tracksContent),
+    [
+      "**日常**",
+      "",
+      "- [ ] 起床任务",
+      "",
+      "**限期**",
+      "",
+      "- [/] keep deadline parent",
+      "  - [ ] keep deadline child",
+      "",
+      "**主线**",
+      "",
+      "- [ ] keep mainline",
+      "",
+      "**支线**",
+      "",
+      "- [ ] keep side",
     ].join("\n")
   );
 });
@@ -770,6 +988,32 @@ test("collectCompletedTaskCacheBlocks keeps parent context for completed childre
   ]);
 });
 
+test("extractCurrentRefreshCacheEntries includes completed 限期 tasks", () => {
+  const currentContent = [
+    "**日常**",
+    "",
+    "- [x] 起床任务",
+    "",
+    "**限期**",
+    "",
+    "- [x] 休学流程：系统提交申请",
+    "",
+    "**主线**",
+    "",
+    "- [x] 完成主线",
+    "",
+    "**支线**",
+    "",
+  ].join("\n");
+
+  assert.deepEqual(extractCurrentRefreshCacheEntries(currentContent), {
+    "日常": ["- [x] 起床任务"],
+    "限期": ["- [x] 休学流程：系统提交申请"],
+    "主线": ["- [x] 完成主线"],
+    "支线": [],
+  });
+});
+
 test("mergeCurrentDailyCacheContent appends by section without duplicating blocks", () => {
   const date = "2026-04-28";
   const existingContent = [
@@ -798,6 +1042,7 @@ test("mergeCurrentDailyCacheContent appends by section without duplicating block
 
   assert.deepEqual(parseCurrentDailyCacheEntries(merged), {
     "日常": ["- [x] 起床任务", "- [x] 读三篇论文"],
+    "限期": [],
     "主线": [
       [
         "- [/] 父项目",
@@ -815,6 +1060,8 @@ test("mergeCurrentDailyCacheContent appends by section without duplicating block
     "",
     "- [x] 起床任务",
     "- [x] 读三篇论文",
+    "",
+    "## 限期",
     "",
     "## 主线",
     "",
@@ -1331,6 +1578,7 @@ test("refreshCurrentDailySection writes cache and can run repeatedly in one day"
   assert.equal(fileContents.get("01-tracks/current.md"), expectedCurrent);
   assert.deepEqual(parseCurrentDailyCacheEntries(fileContents.get(cachePath)), {
     "日常": ["- [x] 起床任务"],
+    "限期": [],
     "主线": [
       "- [x] 已完成主线",
       [
@@ -1348,6 +1596,7 @@ test("refreshCurrentDailySection writes cache and can run repeatedly in one day"
   assert.equal(fileContents.get("01-tracks/current.md"), expectedCurrent);
   assert.deepEqual(parseCurrentDailyCacheEntries(fileContents.get(cachePath)), {
     "日常": ["- [x] 起床任务"],
+    "限期": [],
     "主线": [
       "- [x] 已完成主线",
       [

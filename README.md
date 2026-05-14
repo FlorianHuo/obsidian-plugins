@@ -42,7 +42,7 @@ npm run dev
 
 | Plugin | Description | Status |
 |--------|-------------|--------|
-| [task-flow](./task-flow/) | Add task status shortcuts plus editor task sorting for Things-style workflows | v0.1.1 |
+| [task-flow](./task-flow/) | Add task status shortcuts plus editor task sorting for Things-style workflows | v0.1.2 |
 | [workspace-switcher](./workspace-switcher/) | Manage saved workspaces with quick switching and auto-update daily notes in Beijing time | v1.1.1 |
 
 ## Changelog
@@ -69,6 +69,8 @@ npm run dev
 - Parent tasks now reset from `[/]` to `[ ]` when no child task remains in progress
 - Sorting a partial nested task region now preserves the trailing newline, so the next task no longer gets merged into the previous line
 - Native checkbox auto-sorting now runs as a follow-up edit instead of a same-transaction rewrite, which avoids Live Preview conflict markers
+- Add a temporary `Next` banner at the top of `01-tracks/current.md`: it shows the deepest first `[/]` task and `Jump to Next current task` opens that line
+- Adapt current refresh/cache handling to the new `日常 / 限期 / 主线 / 支线` layout: `Alt+C` preserves and cleans `限期`, caches completed `限期` items, and keeps shop settlement limited to top-level `主线` tasks
 
 #### v0.1.0 (2026-04-10)
 
