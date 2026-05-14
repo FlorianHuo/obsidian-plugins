@@ -3,6 +3,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
+const TaskStatusShortcutsPlugin = require("./main.js");
+
 const {
   applyStatusToLine,
   applyTaskStatusCommandToEditor,
@@ -37,7 +39,7 @@ const {
   setTaskStatus,
   toggleStatusOnLine,
   toggleTaskStatus,
-} = require("./main.js");
+} = TaskStatusShortcutsPlugin;
 
 function createMockEditor(lines, selection) {
   return {
@@ -112,6 +114,34 @@ function createMockLeaf(filePath) {
     callbacks,
   };
 }
+
+function createMockPluginForOnload() {
+  const plugin = new TaskStatusShortcutsPlugin();
+  const commands = [];
+  plugin.app = {};
+  plugin.loadData = async () => ({});
+  plugin.saveData = async () => undefined;
+  plugin.registerEditorExtension = () => undefined;
+  plugin.registerEvent = () => undefined;
+  plugin.register = () => undefined;
+  plugin.addCommand = (command) => {
+    commands.push(command);
+  };
+  return { plugin, commands };
+}
+
+test("plugin does not register obsolete current day settlement commands", async () => {
+  const { plugin, commands } = createMockPluginForOnload();
+
+  await plugin.onload();
+
+  const commandIds = commands.map((command) => command.id);
+  assert.equal(commandIds.includes("preview-current-day-settlement"), false);
+  assert.equal(commandIds.includes("settle-current-day"), false);
+  assert.equal(commandIds.includes("settle-unsettled-current-daily-cache-day"), false);
+  assert.equal(commandIds.includes("jump-to-next-current-task"), true);
+  assert.equal(commandIds.includes("refresh-current-daily-section"), true);
+});
 
 test("findNextInProgressTaskInCurrentContent returns the only top-level in-progress task", () => {
   const currentContent = [

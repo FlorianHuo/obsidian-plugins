@@ -3293,23 +3293,6 @@ class TaskStatusShortcutsPlugin extends PluginClass {
       callback: () => void runCurrentDailyRefresh(this),
     });
 
-    this.addCommand({
-      id: "preview-current-day-settlement",
-      name: "Preview current day settlement",
-      callback: () => void previewCurrentDaySettlement(this.app),
-    });
-
-    this.addCommand({
-      id: "settle-current-day",
-      name: "Settle current day",
-      callback: () => void settleCurrentDay(this.app),
-    });
-
-    this.addCommand({
-      id: "settle-unsettled-current-daily-cache-day",
-      name: "Settle unsettled day",
-      callback: () => void settleUnsettledCurrentDailyCacheDay(this.app),
-    });
   }
 }
 

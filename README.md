@@ -42,7 +42,7 @@ npm run dev
 
 | Plugin | Description | Status |
 |--------|-------------|--------|
-| [task-flow](./task-flow/) | Add task status shortcuts plus editor task sorting for Things-style workflows | v0.1.2 |
+| [task-flow](./task-flow/) | Add task status shortcuts plus editor task sorting for Things-style workflows | v0.1.3 |
 | [workspace-switcher](./workspace-switcher/) | Manage saved workspaces with quick switching and auto-update daily notes in Beijing time | v1.1.1 |
 
 ## Changelog
@@ -55,11 +55,7 @@ npm run dev
 - Starting a child task now marks each ancestor task as in progress before sorting the affected branches
 - Completing a parent task now marks all descendant tasks as done before sorting the branch
 - Add a repeatable `01-tracks/current.md` refresh action with the existing header icon and default `Alt+C` command: cache completed items to `01-tracks/cache/YYYY-MM-DD.md`, keep completed `日常` items out of `current.md` for the rest of the day, and prune completed `[x]` items out of `主线 / 支线`
-- Add `Preview current day settlement`, a read-only command that lists completed top-level `主线` items from today's cache without modifying `shop.md`
-- Add `Settle current day`, a manual command that records completed top-level `主线` items in `04-governance/shop.md` and updates the shop balance
-- Add `Settle unsettled day`, a manual picker for cache dates that still need `主线` ledger settlement or `日常` restore
-- `Settle current day` now inserts new shop ledger rows directly above existing rows without leaving a blank gap
-- `Settle current day` now restores hidden completed `日常` tasks in `current.md` from `Rhythms/Daily`
+- Remove the obsolete current-day settlement commands from the command palette; shop day-end settlement now happens through Terra rather than `task-flow`
 - `Alt+C` now saves an open `current.md` view before refresh so newly completed tasks are pruned in the same run
 - Cache files under `01-tracks/cache/` now omit the duplicate top-level date heading
 - `Mod+L` now inserts a new unchecked task on blank lines, and on an empty unchecked task line it clears the line back to blank
@@ -70,7 +66,7 @@ npm run dev
 - Sorting a partial nested task region now preserves the trailing newline, so the next task no longer gets merged into the previous line
 - Native checkbox auto-sorting now runs as a follow-up edit instead of a same-transaction rewrite, which avoids Live Preview conflict markers
 - Add a temporary `Next` banner at the top of `01-tracks/current.md`: it shows the deepest first `[/]` task and `Jump to Next current task` opens that line
-- Adapt current refresh/cache handling to the new `日常 / 限期 / 主线 / 支线` layout: `Alt+C` preserves and cleans `限期`, caches completed `限期` items, and keeps shop settlement limited to top-level `主线` tasks
+- Adapt current refresh/cache handling to the new `日常 / 限期 / 主线 / 支线` layout: `Alt+C` preserves and cleans `限期`, and caches completed `限期` items separately from `主线 / 支线`
 
 #### v0.1.0 (2026-04-10)
 
