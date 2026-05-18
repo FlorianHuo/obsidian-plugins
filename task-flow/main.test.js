@@ -18,7 +18,6 @@ const {
   extractCompletedMainlineSettlementItems,
   extractCurrentRefreshCacheEntries,
   findNextInProgressTaskInCurrentContent,
-  extractRhythmsDailyTasks,
   getCurrentDailyCacheFilePath,
   getCurrentDailyCacheDateFromPath,
   getTodayDateStr,
@@ -738,30 +737,6 @@ test("applyTaskStatusCommandToEditor marks descendant tasks done when a parent i
   });
 });
 
-test("extractRhythmsDailyTasks keeps only top-level Daily tasks and clears their status", () => {
-  const tracksContent = [
-    "## Active",
-    "",
-    "- something else",
-    "",
-    "## Rhythms",
-    "",
-    "**Daily**",
-    "- [x] 起床任务",
-    "  - [/] 子项目会被忽略",
-    "    deeper child",
-    "- [/] 读三篇论文",
-    "",
-    "**Weekly**",
-    "- 周一讨论班",
-  ].join("\n");
-
-  assert.deepEqual(extractRhythmsDailyTasks(tracksContent), [
-    "起床任务",
-    "读三篇论文",
-  ]);
-});
-
 test("replaceCurrentDailySection only rewrites the 日常 block", () => {
   const currentContent = [
     "",
@@ -847,12 +822,13 @@ test("replaceCurrentDailySection preserves the 限期 block between 日常 and �
   ].join("\n"));
 });
 
-test("buildRefreshedCurrentContent rebuilds 日常 from Rhythms/Daily", () => {
+test("buildRefreshedCurrentContent cleans 日常 directly from current.md without Rhythms", () => {
   const currentContent = [
     "**日常**",
     "",
     "- [x] old",
     "  - [ ] child to drop",
+    "- [ ] keep daily",
     "",
     "**主线**",
     "",
@@ -870,24 +846,13 @@ test("buildRefreshedCurrentContent rebuilds 日常 from Rhythms/Daily", () => {
     "  - [x] drop side child",
     "  - [/] keep side child",
   ].join("\n");
-  const tracksContent = [
-    "## Rhythms",
-    "",
-    "**Daily**",
-    "- [x] 起床任务",
-    "  - [ ] ignored child",
-    "- 读三篇论文",
-    "",
-    "**Weekly**",
-  ].join("\n");
 
   assert.equal(
-    buildRefreshedCurrentContent(currentContent, tracksContent),
+    buildRefreshedCurrentContent(currentContent),
     [
       "**日常**",
       "",
-      "- [ ] 起床任务",
-      "- [ ] 读三篇论文",
+      "- [ ] keep daily",
       "",
       "**主线**",
       "",
@@ -926,21 +891,10 @@ test("buildRefreshedCurrentContent preserves and cleans the 限期 block", () =>
     "- [x] drop done side",
     "- [ ] keep side",
   ].join("\n");
-  const tracksContent = [
-    "## Rhythms",
-    "",
-    "**Daily**",
-    "- 起床任务",
-    "",
-    "**Weekly**",
-  ].join("\n");
-
   assert.equal(
-    buildRefreshedCurrentContent(currentContent, tracksContent),
+    buildRefreshedCurrentContent(currentContent),
     [
       "**日常**",
-      "",
-      "- [ ] 起床任务",
       "",
       "**限期**",
       "",
@@ -958,7 +912,7 @@ test("buildRefreshedCurrentContent preserves and cleans the 限期 block", () =>
   );
 });
 
-test("buildRefreshedCurrentContent keeps a single blank gap when Rhythms/Daily is empty", () => {
+test("buildRefreshedCurrentContent keeps a single blank gap when 日常 becomes empty", () => {
   const currentContent = [
     "**日常**",
     "",
@@ -972,16 +926,9 @@ test("buildRefreshedCurrentContent keeps a single blank gap when Rhythms/Daily i
     "",
     "- [x] drop",
   ].join("\n");
-  const tracksContent = [
-    "## Rhythms",
-    "",
-    "**Daily**",
-    "",
-    "**Weekly**",
-  ].join("\n");
 
   assert.equal(
-    buildRefreshedCurrentContent(currentContent, tracksContent),
+    buildRefreshedCurrentContent(currentContent),
     [
       "**日常**",
       "",
@@ -1214,17 +1161,6 @@ test("settleCurrentDay records mainline items and restores daily tasks", async (
   const cachePath = getCurrentDailyCacheFilePath(date);
   const fileContents = new Map([
     [
-      "01-tracks/tracks.md",
-      [
-        "## Rhythms",
-        "",
-        "**Daily**",
-        "- 起床任务",
-        "- 读三篇论文",
-        "",
-      ].join("\n"),
-    ],
-    [
       "01-tracks/current.md",
       [
         "**今日：结算后恢复日常**",
@@ -1312,17 +1248,6 @@ test("settleCurrentDay restores daily tasks even when no mainline items are comp
   const cachePath = getCurrentDailyCacheFilePath(date);
   const fileContents = new Map([
     [
-      "01-tracks/tracks.md",
-      [
-        "## Rhythms",
-        "",
-        "**Daily**",
-        "- 起床任务",
-        "- 读三篇论文",
-        "",
-      ].join("\n"),
-    ],
-    [
       "01-tracks/current.md",
       [
         "**日常**",
@@ -1390,17 +1315,6 @@ test("getCurrentDailyCacheDateFromPath only matches current.md cache files", () 
 
 test("listUnsettledCurrentDailyCacheSettlementOptions lists dates needing ledger or restore", async () => {
   const fileContents = new Map([
-    [
-      "01-tracks/tracks.md",
-      [
-        "## Rhythms",
-        "",
-        "**Daily**",
-        "- 起床任务",
-        "- 读三篇论文",
-        "",
-      ].join("\n"),
-    ],
     [
       "01-tracks/current.md",
       [
@@ -1525,18 +1439,6 @@ test("refreshCurrentDailySection writes cache and can run repeatedly in one day"
   const cachePath = getCurrentDailyCacheFilePath(today);
   const folders = new Set(["01-tracks"]);
   const fileContents = new Map([
-    [
-      "01-tracks/tracks.md",
-      [
-        "## Rhythms",
-        "",
-        "**Daily**",
-        "",
-        "- 起床任务",
-        "- 读三篇论文",
-        "",
-      ].join("\n"),
-    ],
     [
       "01-tracks/current.md",
       [
@@ -1666,17 +1568,6 @@ test("refreshCurrentDailySection saves an open current.md view before reading co
     "",
   ].join("\n");
   const fileContents = new Map([
-    [
-      "01-tracks/tracks.md",
-      [
-        "## Rhythms",
-        "",
-        "**Daily**",
-        "",
-        ...tasks.map((task) => `- ${task}`),
-        "",
-      ].join("\n"),
-    ],
     ["01-tracks/current.md", savedCurrentContent],
   ]);
   const currentLeaf = {

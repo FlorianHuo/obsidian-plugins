@@ -568,7 +568,7 @@ function getCurrentDailyCacheDateFromPath(path) {
   return match ? match[1] : null;
 }
 
-function normalizeDailyRhythmTask(line) {
+function normalizeListTaskText(line) {
   const bulletMatch = line.match(/^\s*-\s+(.*)$/);
   if (!bulletMatch) return null;
 
@@ -578,61 +578,6 @@ function normalizeDailyRhythmTask(line) {
   const checkboxMatch = rawText.match(/^\[[^\]]?\]\s*(.*)$/);
   const taskText = checkboxMatch ? checkboxMatch[1].trim() : rawText;
   return taskText === "" ? null : taskText;
-}
-
-function extractRhythmsDailyTasks(tracksContent) {
-  const lines = tracksContent.split("\n");
-  let foundRhythms = false;
-  let foundDaily = false;
-  const tasks = [];
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    if (!foundRhythms) {
-      if (trimmed === "## Rhythms") {
-        foundRhythms = true;
-      }
-      continue;
-    }
-
-    if (!foundDaily) {
-      if (/^##\s+/.test(trimmed) && trimmed !== "## Rhythms") {
-        return null;
-      }
-      if (trimmed === "**Daily**") {
-        foundDaily = true;
-      }
-      continue;
-    }
-
-    if (trimmed === "") {
-      continue;
-    }
-
-    if (/^##\s+/.test(trimmed) || /^\*\*.+\*\*$/.test(trimmed)) {
-      break;
-    }
-
-    const indentMatch = line.match(/^(\s*)/);
-    const indent = indentMatch ? indentMatch[1] : "";
-    if (indent.length > 0) {
-      continue;
-    }
-
-    const taskText = normalizeDailyRhythmTask(line);
-    if (taskText === null) {
-      return null;
-    }
-
-    tasks.push(taskText);
-  }
-
-  if (!foundRhythms || !foundDaily) {
-    return null;
-  }
-
-  return tasks;
 }
 
 function renderCurrentDailySectionLines(tasks) {
@@ -706,11 +651,17 @@ function replaceCurrentDailySection(currentContent, dailyTasks) {
   return preserveTrailingNewlines(currentContent, updatedLines.join("\n"));
 }
 
+function normalizeBlankOnlySectionBody(bodyText) {
+  return trimBlankLines(bodyText.split("\n")).length === 0 ? "" : bodyText;
+}
+
 function cleanCarryoverSection(lines, headingText, nextHeadingText = null) {
   const sectionRange = findCurrentSectionRange(lines, headingText, nextHeadingText);
   if (!sectionRange) return null;
 
-  const cleanedBody = removeCompletedContent(getSectionBodyText(lines, sectionRange));
+  const cleanedBody = normalizeBlankOnlySectionBody(
+    removeCompletedContent(getSectionBodyText(lines, sectionRange))
+  );
   return replaceCurrentSectionBody(lines, sectionRange, cleanedBody);
 }
 
@@ -718,21 +669,20 @@ function normalizeTaskTextKey(text) {
   return text.trim();
 }
 
-function buildCurrentRefreshLines(currentContent, dailyTasks, options = {}) {
+function buildCurrentRefreshLines(currentContent) {
   const lines = currentContent.split("\n");
-  const excludedDailyTasks = options.excludedDailyTasks || new Set();
-  const visibleDailyTasks = dailyTasks.filter(
-    (task) => !excludedDailyTasks.has(normalizeTaskTextKey(task))
-  );
-  const withDailyReset = replaceCurrentDailySectionLines(lines, visibleDailyTasks);
-  if (!withDailyReset) return null;
+  const withDailyCleaned = cleanCarryoverSection(lines, CURRENT_DAILY_HEADING, [
+    CURRENT_DEADLINE_HEADING,
+    CURRENT_MAINLINE_HEADING,
+  ]);
+  if (!withDailyCleaned) return null;
 
   const withDeadlineCleaned = cleanCarryoverSection(
-    withDailyReset,
+    withDailyCleaned,
     CURRENT_DEADLINE_HEADING,
     CURRENT_MAINLINE_HEADING
   );
-  const beforeMainClean = withDeadlineCleaned || withDailyReset;
+  const beforeMainClean = withDeadlineCleaned || withDailyCleaned;
 
   const withMainCleaned = cleanCarryoverSection(
     beforeMainClean,
@@ -747,13 +697,8 @@ function buildCurrentRefreshLines(currentContent, dailyTasks, options = {}) {
   return withSideCleaned;
 }
 
-function buildRefreshedCurrentContent(currentContent, tracksContent, options = {}) {
-  const dailyTasks = extractRhythmsDailyTasks(tracksContent);
-  if (dailyTasks === null) {
-    return null;
-  }
-
-  const refreshedLines = buildCurrentRefreshLines(currentContent, dailyTasks, options);
+function buildRefreshedCurrentContent(currentContent) {
+  const refreshedLines = buildCurrentRefreshLines(currentContent);
   if (!refreshedLines) {
     return null;
   }
@@ -1014,22 +959,35 @@ function mergeCurrentDailyCacheContent(existingContent, date, incomingEntries) {
   return renderCurrentDailyCacheContent(date, mergedEntries);
 }
 
-function extractCachedCompletedDailyTaskTexts(cacheContent) {
+function extractCachedCompletedDailyTaskTextList(cacheContent) {
   const entries = parseCurrentDailyCacheEntries(cacheContent);
-  const completedTexts = new Set();
+  const completedTexts = [];
+  const seen = new Set();
 
   for (const block of entries["日常"] || []) {
     const firstLine = block.split("\n").find((line) => matchTaskLine(line));
     const taskMatch = firstLine ? matchTaskLine(firstLine) : null;
     if (!taskMatch || !isCompletedTaskMarker(taskMatch[2])) continue;
 
-    const taskText = normalizeDailyRhythmTask(firstLine);
+    const taskText = normalizeListTaskText(firstLine);
     if (taskText !== null) {
-      completedTexts.add(normalizeTaskTextKey(taskText));
+      const key = normalizeTaskTextKey(taskText);
+      if (!seen.has(key)) {
+        seen.add(key);
+        completedTexts.push(taskText);
+      }
     }
   }
 
   return completedTexts;
+}
+
+function extractCachedCompletedDailyTaskTexts(cacheContent) {
+  return new Set(
+    extractCachedCompletedDailyTaskTextList(cacheContent).map((task) =>
+      normalizeTaskTextKey(task)
+    )
+  );
 }
 
 function extractTaskTextFromTaskLine(line) {
@@ -1106,7 +1064,7 @@ function findNextInProgressTaskInCurrentContent(currentContent) {
   };
 }
 
-function extractCurrentDailyTaskTextKeys(currentContent) {
+function extractCurrentDailyTaskTexts(currentContent) {
   const lines = currentContent.split("\n");
   const dailySection = findCurrentSectionRange(lines, CURRENT_DAILY_HEADING, [
     CURRENT_DEADLINE_HEADING,
@@ -1114,32 +1072,35 @@ function extractCurrentDailyTaskTextKeys(currentContent) {
   ]);
   if (!dailySection) return null;
 
-  const keys = new Set();
+  const tasks = [];
   for (const line of getSectionBodyText(lines, dailySection).split("\n")) {
     const taskText = extractTaskTextFromTaskLine(line);
     if (taskText !== null) {
-      keys.add(normalizeTaskTextKey(taskText));
+      tasks.push(taskText);
     }
   }
 
-  return keys;
+  return tasks;
 }
 
-function countRestorableCachedDailyTasks(cacheContent, tracksContent, currentContent) {
-  const dailyTasks = extractRhythmsDailyTasks(tracksContent);
+function extractCurrentDailyTaskTextKeys(currentContent) {
+  const tasks = extractCurrentDailyTaskTexts(currentContent);
+  if (tasks === null) return null;
+
+  return new Set(tasks.map((task) => normalizeTaskTextKey(task)));
+}
+
+function countRestorableCachedDailyTasks(cacheContent, currentContent) {
   const currentDailyTaskKeys = extractCurrentDailyTaskTextKeys(currentContent);
-  if (dailyTasks === null || currentDailyTaskKeys === null) {
+  if (currentDailyTaskKeys === null) {
     return 0;
   }
 
-  const rhythmDailyTaskKeys = new Set(
-    dailyTasks.map((task) => normalizeTaskTextKey(task))
-  );
-  const cachedDailyTaskKeys = extractCachedCompletedDailyTaskTexts(cacheContent);
+  const cachedDailyTasks = extractCachedCompletedDailyTaskTextList(cacheContent);
   let count = 0;
 
-  for (const taskKey of cachedDailyTaskKeys) {
-    if (rhythmDailyTaskKeys.has(taskKey) && !currentDailyTaskKeys.has(taskKey)) {
+  for (const task of cachedDailyTasks) {
+    if (!currentDailyTaskKeys.has(normalizeTaskTextKey(task))) {
       count += 1;
     }
   }
@@ -2454,7 +2415,6 @@ async function listUnsettledCurrentDailyCacheSettlementOptions(app) {
   }
 
   const shopContent = await readVaultFileIfExists(app, SHOP_FILE_PATH);
-  const tracksContent = await readVaultFileIfExists(app, TRACKS_FILE_PATH);
   const currentContent = await readVaultFileIfExists(app, CURRENT_TRACKS_FILE_PATH);
   const candidates = [];
   // Missing daily tasks are current.md state, so attach restore work to the newest matching cache date.
@@ -2471,8 +2431,8 @@ async function listUnsettledCurrentDailyCacheSettlementOptions(app) {
         ? mainlineItems
         : filterUnsettledSettlementItems(mainlineItems, shopContent);
     const restorableDailyCount =
-      tracksContent !== null && currentContent !== null
-        ? countRestorableCachedDailyTasks(cacheContent, tracksContent, currentContent)
+      currentContent !== null
+        ? countRestorableCachedDailyTasks(cacheContent, currentContent)
         : 0;
 
     if (latestRestorableDailyDate === null && restorableDailyCount > 0) {
@@ -2573,15 +2533,13 @@ async function refreshCurrentDailySection(
   await saveOpenMarkdownFile(app, CURRENT_TRACKS_FILE_PATH);
 
   const today = getTodayDateStr();
-  const tracksFile = app.vault.getAbstractFileByPath(TRACKS_FILE_PATH);
   const currentFile = app.vault.getAbstractFileByPath(CURRENT_TRACKS_FILE_PATH);
 
-  if (!tracksFile || !currentFile) {
-    new NoticeClass("Missing tracks.md or current.md for daily refresh.");
+  if (!currentFile) {
+    new NoticeClass("Missing current.md for daily refresh.");
     return false;
   }
 
-  const tracksContent = await app.vault.read(tracksFile);
   const currentContent = await app.vault.read(currentFile);
   const cacheEntries = extractCurrentRefreshCacheEntries(currentContent);
   const cachePath = getCurrentDailyCacheFilePath(today);
@@ -2591,13 +2549,10 @@ async function refreshCurrentDailySection(
     today,
     cacheEntries
   );
-  const excludedDailyTasks = extractCachedCompletedDailyTaskTexts(mergedCacheContent);
-  const preview = buildRefreshedCurrentContent(currentContent, tracksContent, {
-    excludedDailyTasks,
-  });
+  const preview = buildRefreshedCurrentContent(currentContent);
 
   if (preview === null) {
-    new NoticeClass("Daily refresh needs a valid Rhythms/Daily block and current.md sections.");
+    new NoticeClass("Daily refresh needs valid current.md sections (日常/主线/支线).");
     return false;
   }
 
@@ -2607,9 +2562,7 @@ async function refreshCurrentDailySection(
   let failed = false;
 
   await app.vault.process(currentFile, (data) => {
-    const updated = buildRefreshedCurrentContent(data, tracksContent, {
-      excludedDailyTasks,
-    });
+    const updated = buildRefreshedCurrentContent(data);
     if (updated === null) {
       failed = true;
       return data;
@@ -2624,7 +2577,7 @@ async function refreshCurrentDailySection(
     return false;
   }
 
-  new NoticeClass("current.md daily section refreshed.");
+  new NoticeClass("current.md daily section refreshed (no Rhythms template).");
   return true;
 }
 
@@ -2646,23 +2599,37 @@ async function previewCurrentDaySettlement(app, date = getTodayDateStr()) {
   };
 }
 
-async function restoreCurrentDailySection(app) {
-  const tracksFile = app.vault.getAbstractFileByPath(TRACKS_FILE_PATH);
-  const currentFile = app.vault.getAbstractFileByPath(CURRENT_TRACKS_FILE_PATH);
+function mergeDailyTasksForRestore(cachedDailyTasks, currentDailyTasks) {
+  const merged = [];
+  const seen = new Set();
 
-  if (!tracksFile || !currentFile) {
+  for (const task of [...cachedDailyTasks, ...currentDailyTasks]) {
+    const key = normalizeTaskTextKey(task);
+    if (key === "" || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(task);
+  }
+
+  return merged;
+}
+
+async function restoreCurrentDailySection(app, date = getTodayDateStr()) {
+  const currentFile = app.vault.getAbstractFileByPath(CURRENT_TRACKS_FILE_PATH);
+  if (!currentFile) {
     return {
       changed: false,
       failed: true,
     };
   }
 
-  const tracksContent = await app.vault.read(tracksFile);
-  const dailyTasks = extractRhythmsDailyTasks(tracksContent);
-  if (dailyTasks === null) {
+  const cacheContent = await readVaultFileIfExists(
+    app,
+    getCurrentDailyCacheFilePath(date)
+  );
+  if (cacheContent === null) {
     return {
       changed: false,
-      failed: true,
+      failed: false,
     };
   }
 
@@ -2670,7 +2637,18 @@ async function restoreCurrentDailySection(app) {
   let failed = false;
 
   await app.vault.process(currentFile, (data) => {
-    const updated = replaceCurrentDailySection(data, dailyTasks);
+    const currentDailyTasks = extractCurrentDailyTaskTexts(data);
+    if (currentDailyTasks === null) {
+      failed = true;
+      return data;
+    }
+
+    const cachedDailyTasks = extractCachedCompletedDailyTaskTextList(cacheContent);
+    const restoredDailyTasks = mergeDailyTasksForRestore(
+      cachedDailyTasks,
+      currentDailyTasks
+    );
+    const updated = replaceCurrentDailySection(data, restoredDailyTasks);
     if (updated === null) {
       failed = true;
       return data;
@@ -2722,7 +2700,7 @@ async function settleCurrentDay(app, date = getTodayDateStr()) {
     }
   }
 
-  const restoreResult = await restoreCurrentDailySection(app);
+  const restoreResult = await restoreCurrentDailySection(app, date);
   const restoreMessage = restoreResult.changed
     ? " Daily tasks restored."
     : restoreResult.failed
@@ -3309,7 +3287,6 @@ module.exports.getActiveMarkdownView = getActiveMarkdownView;
 module.exports.runTaskStatusCommand = runTaskStatusCommand;
 module.exports.buildRefreshedCurrentContent = buildRefreshedCurrentContent;
 module.exports.collectCompletedTaskCacheBlocks = collectCompletedTaskCacheBlocks;
-module.exports.extractRhythmsDailyTasks = extractRhythmsDailyTasks;
 module.exports.extractCachedCompletedDailyTaskTexts = extractCachedCompletedDailyTaskTexts;
 module.exports.extractCompletedMainlineSettlementItems = extractCompletedMainlineSettlementItems;
 module.exports.extractCurrentRefreshCacheEntries = extractCurrentRefreshCacheEntries;
